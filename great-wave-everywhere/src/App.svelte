@@ -1,83 +1,89 @@
 <script>
-    import { onMount } from "svelte";
-    import axios from "axios";
-    import * as d3 from "d3";
+  import { fetchWords, updateWord, fetchTrendingWords } from './api'
 
-    let images = [];
-    let userQuery = "";
-    let nodes = [];
-    let links = [];
-    let simulation;
+  import { onMount } from "svelte"
+  import axios from "axios"
+  import * as d3 from "d3"
 
-    async function fetchImages() {
-        try {
-           const response = await axios.get(`https://great-wave-api-1muq.onrender.com/api/images?q=${userQuery}`);
-            images = response.data;
-            console.log("Fetched images:", images);
-            
-            addOrUpdateNode(userQuery);
-        } catch (error) {
-            console.error("Error fetching images", error);
-        }
+  let images = []
+  let userQuery = ""
+  let nodes = []
+  let links = []
+  let simulation
+    let trending = []
+
+  // 🔁 Load existing words from Firestore on mount
+  onMount(async () => {
+    nodes = await fetchWords()
+    trending = await fetchTrendingWords(5)
+    buildLinks()
+    restartSimulation()
+  })
+
+  async function fetchImages() {
+    if (!userQuery) return
+
+    try {
+      const response = await axios.get(`https://great-wave-api-1muq.onrender.com/api/images?q=${userQuery}`)
+      images = response.data
+      console.log("Fetched images:", images)
+
+      await updateWord(userQuery)          // 🔼 update Firestore
+      nodes = await fetchWords()           // ⬇️ re-fetch updated nodes
+      trending = await fetchTrendingWords(5)
+      buildLinks()
+      restartSimulation()
+      userQuery = ""
+    } catch (error) {
+      console.error("Error fetching images", error)
     }
+  }
 
-    function addOrUpdateNode(query) {
-        // Check if the node already exists
-        const existingNode = nodes.find(node => node.id === query);
-
-        if (existingNode) {
-            // If the node exists, increment its count
-            existingNode.count += 1;
-        } else {
-            // If the node doesn't exist, add it with an initial count of 1
-            nodes = [...nodes, { id: query, count: 1 }];
-
-            // Add a link to the previous node if it exists
-            if (nodes.length > 1) {
-                links = [...links, { source: nodes[nodes.length - 2].id, target: query }];
-            }
-        }
-
-        // Restart the simulation whenever nodes or links are updated
-        restartSimulation();
+  function buildLinks() {
+    links = []
+    for (let i = 1; i < nodes.length; i++) {
+      links.push({ source: nodes[i - 1].id, target: nodes[i].id })
     }
+  }
 
-    function restartSimulation() {
-        // Initialize or update the D3 force simulation
-        simulation = d3.forceSimulation(nodes)
-            .force("link", d3.forceLink(links).id(d => d.id).distance(100))
-            .force("charge", d3.forceManyBody().strength(-200))
-            .force("center", d3.forceCenter(200, 300)) // Center of the SVG
-            .force("gravity", d3.forceRadial(d => 300 - d.count * 20, 200, 300)) // Pull higher-count nodes closer to the center
-            .on("tick", () => {
-                // Trigger Svelte reactivity by reassigning the nodes array
-                nodes = [...nodes];
-            });
+  function restartSimulation() {
+    simulation = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+      .force("charge", d3.forceManyBody().strength(-200))
+      .force("center", d3.forceCenter(200, 300))
+      .force("gravity", d3.forceRadial(d => 300 - d.count * 20, 200, 300))
+      .on("tick", () => {
+        nodes = [...nodes]
+      })
+  }
+
+  function getNodeById(id) {
+    return nodes.find(node => node.id === id)
+  }
+
+  function getLinkCoordinates(link) {
+    const sourceNode = getNodeById(link.source)
+    const targetNode = getNodeById(link.target)
+    return {
+      x1: sourceNode?.x || 0,
+      y1: sourceNode?.y || 0,
+      x2: targetNode?.x || 0,
+      y2: targetNode?.y || 0
     }
-
-    // Function to calculate link positions
-    function getNodeById(id) {
-        return nodes.find(node => node.id === id);
-    }
-
-    function getLinkCoordinates(link) {
-        const sourceNode = getNodeById(link.source);
-        const targetNode = getNodeById(link.target);
-        return {
-            x1: sourceNode?.x || 0,
-            y1: sourceNode?.y || 0,
-            x2: targetNode?.x || 0,
-            y2: targetNode?.y || 0
-        };
-    }
-
-    onMount(() => {
-        // Initialize the simulation when the component is mounted
-        restartSimulation();
-    });
+  }
 </script>
 
+
 <main>
+  <div class="trending-panel">
+  <h2>🔥 Trending</h2>
+  <ul>
+    {#each trending as word}
+      <li>{word.id} <span class="count">({word.count})</span></li>
+    {/each}
+  </ul>
+</div>
+
     <h1><span>Hokusai's legendary </span><span  class="italic">"Great Wave off Kanagawa" </span><span> can be</span></h1>
     <input type="text" bind:value={userQuery} placeholder="anything" />
     <button on:click={fetchImages}>Search</button>
@@ -202,4 +208,36 @@
         cursor: pointer;
         font-family: Arial, sans-serif;
     }
+    .trending-panel {
+  background-color: #222;
+  color: white;
+  padding: 1rem;
+  border-radius: 10px;
+  width: 200px;
+  margin: 1rem;
+  font-family: sans-serif;
+}
+
+.trending-panel h2 {
+  font-size: 1.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.trending-panel ul {
+  list-style: none;
+  padding: 0;
+}
+
+.trending-panel li {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+  font-size: 1rem;
+}
+
+.trending-panel .count {
+  color: #bbb;
+  font-size: 0.9rem;
+}
+
 </style>
