@@ -10,19 +10,26 @@
   let nodes = []
   let links = []
   let simulation
-    let trending = []
+  let trending = []
+  let loading = false
 
   // 🔁 Load existing words from Firestore on mount
   onMount(async () => {
-    nodes = await fetchWords()
-    trending = await fetchTrendingWords(5)
-    buildLinks()
-    restartSimulation()
+    loading = true
+    try {
+      nodes = await fetchWords()
+      trending = await fetchTrendingWords(5)
+      buildLinks()
+      restartSimulation()
+    } finally {
+      loading = false
+    }
   })
 
   async function fetchImages() {
     if (!userQuery) return
 
+    loading = true
     try {
       const response = await axios.get(`https://great-wave-api-1muq.onrender.com/api/images?q=${userQuery}`)
       images = response.data
@@ -36,6 +43,8 @@
       userQuery = ""
     } catch (error) {
       console.error("Error fetching images", error)
+    } finally {
+      loading = false
     }
   }
 
@@ -48,9 +57,9 @@
 
   function restartSimulation() {
     simulation = d3.forceSimulation(nodes)
-      .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+      .force("link", d3.forceLink(links).id(d => d.id).distance(60)) // reduced from 100 to 60
       .force("charge", d3.forceManyBody().strength(-200))
-      .force("center", d3.forceCenter(200, 300))
+      .force("center", d3.forceCenter(200 * 1.5, 300 * 1.5)) // 50% stronger centering
       .force("gravity", d3.forceRadial(d => 300 - d.count * 20, 200, 300))
       .on("tick", () => {
         nodes = [...nodes]
@@ -75,14 +84,19 @@
 
 
 <main>
+
+  {#if loading}
+    <div class="loading-indicator">Loading...</div>
+  {/if}
+
   <div class="trending-panel">
-  <h2>🔥 Trending</h2>
-  <ul>
-    {#each trending as word}
-      <li>{word.id} <span class="count">({word.count})</span></li>
-    {/each}
-  </ul>
-</div>
+    <h2>🔥 Trending</h2>
+    <ul>
+      {#each trending as word}
+        <li>{word.id} <span class="count">({word.count})</span></li>
+      {/each}
+    </ul>
+  </div>
 
     <h1><span>Hokusai's legendary </span><span  class="italic">"Great Wave off Kanagawa" </span><span> can be</span></h1>
     <input type="text" bind:value={userQuery} placeholder="anything" />
@@ -91,7 +105,9 @@
     {#if images.length > 0}
   <div class="image-container">
     {#each images as img}
-      <img src={img.link} alt={img.title} />
+      <a href={img.link} target="_blank" rel="noopener noreferrer">
+        <img src={img.link} alt={img.title} />
+      </a>
     {/each}
   </div>
 {:else}
@@ -138,6 +154,21 @@
 </main>
 
 <style>
+
+    .loading-indicator {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.5);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      z-index: 1000;
+    }
     .italic {
         font-style: italic;
     }
