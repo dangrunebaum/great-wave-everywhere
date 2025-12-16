@@ -57,7 +57,7 @@
 
   function restartSimulation() {
     simulation = d3.forceSimulation(nodes)
-      .force("link", d3.forceLink(links).id(d => d.id).distance(60)) // reduced from 100 to 60
+      .force("link", d3.forceLink(links).id(d => d.id).distance(10)) // reduced from 100 to 60
       .force("charge", d3.forceManyBody().strength(-200))
       .force("center", d3.forceCenter(200 * 1.5, 300 * 1.5)) // 50% stronger centering
       .force("gravity", d3.forceRadial(d => 300 - d.count * 20, 200, 300))
@@ -105,9 +105,14 @@
     {#if images.length > 0}
   <div class="image-container">
     {#each images as img}
-      <a href={img.link} target="_blank" rel="noopener noreferrer">
-        <img src={img.link} alt={img.title} />
-      </a>
+      <div class="image-with-title">
+        <a href={img.link} target="_blank" rel="noopener noreferrer">
+          <img src={img.link} alt={img.title} />
+        </a>
+        <div class="image-title-box">
+          {@html `<textarea readonly style='width: 180px; font-family: Noto Sans, sans-serif; font-size: 12px; resize: none; border: 1px solid #ccc; border-radius: 4px; background: #f9f9f9; color: #222; margin-top: 0.25rem; text-align: center; padding: 2px 4px; overflow-wrap: break-word; white-space: pre-wrap; box-sizing: border-box;' rows='2'>${img.title}</textarea>`}
+        </div>
+      </div>
     {/each}
   </div>
 {:else}
@@ -154,6 +159,27 @@
 </main>
 
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400&display=swap');
+
+.image-with-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.image-title-box input[type="text"] {
+  font-family: 'Noto Sans', sans-serif;
+  font-size: 12px;
+  width: 100%;
+  margin-top: 0.25rem;
+  text-align: center;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #f9f9f9;
+  color: #222;
+  padding: 2px 4px;
+  overflow:visible
+}
 
     .loading-indicator {
       position: fixed;
