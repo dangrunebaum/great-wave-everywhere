@@ -4,23 +4,106 @@
   import { onMount } from "svelte";
   import axios from "axios";
   import * as d3 from "d3";
+  import * as topojson from "topojson-client";
 
-  let images = [];
-  let userQuery = "";
-  let nodes = [];
-  let links = [];
+  // FIXED: Return null if url is missing so we don't match empty strings
+  function normalizeUrl(url) {
+    if (!url) return null;
+    try {
+      // This removes protocol (http), query strings (?abc=123), and trailing slashes
+      const clean = url
+        .replace(/^https?:\/\//, "")
+        .split("?")[0]
+        .replace(/\/$/, "");
+      return clean;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function getDomain(url) {
+    if (!url) return null;
+    try {
+      // If it's already a domain (no http), the URL constructor might fail,
+      // so we ensure it has a protocol for parsing.
+      const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+      return new URL(fullUrl).hostname;
+    } catch (e) {
+      // Fallback: if URL parsing fails, return the raw string
+      return url;
+    }
+  }
+
+  let isHovered = $state(null);
+  let images = $state([]);
+  let userQuery = $state("");
+  let nodes = $state([]);
+  let links = $state([]);
   let simulation;
-  let trending = [];
-  let loading = false;
+  let trending = $state([]);
+  let loading = $state(false);
+  let serverLocations = $state([]);
+  let worldMapData = $state(null);
+
+  async function loadWorldMap() {
+    try {
+      // console.log("Loading world map data...");
+      const response = await fetch(
+        "/great-wave-everywhere/ne_110m_admin_0_countries.json"
+      );
+
+      // console.log("Fetch response:", response.status, response.statusText);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const topoData = await response.json();
+      // console.log("TopoJSON data loaded");
+      // console.log("Objects in topology:", Object.keys(topoData.objects));
+
+      // Convert TopoJSON to GeoJSON
+      const objectName = Object.keys(topoData.objects)[0];
+      worldMapData = topojson.feature(topoData, topoData.objects[objectName]);
+      // console.log("Converted to GeoJSON format");
+      // console.log("Number of countries:", worldMapData.features.length);
+    } catch (error) {
+      // console.error("Error loading world map data:", error);
+      // Try alternative path
+      try {
+        // console.log("Trying alternative path...");
+        const response = await fetch("/ne_110m_admin_0_countries.json");
+        if (response.ok) {
+          const topoData = await response.json();
+          const objectName = Object.keys(topoData.objects)[0];
+          worldMapData = topojson.feature(
+            topoData,
+            topoData.objects[objectName]
+          );
+          // console.log("World map loaded from alternative path");
+        }
+      } catch (altError) {
+        // console.error("Alternative path also failed:", altError);
+      }
+    }
+  }
 
   // 🔁 Load existing words from Firestore on mount
   onMount(async () => {
     loading = true;
     try {
-      nodes = await fetchWords();
-      trending = await fetchTrendingWords(5);
-      buildLinks();
-      restartSimulation();
+      try {
+        nodes = await fetchWords();
+        trending = await fetchTrendingWords(5);
+        buildLinks();
+        restartSimulation();
+      } catch (firebaseError) {
+        console.warn("Firebase connection failed:", firebaseError);
+        // Continue with empty data
+        nodes = [];
+        trending = [];
+      }
+      await loadWorldMap();
     } finally {
       loading = false;
     }
@@ -35,13 +118,47 @@
         `https://great-wave-api-1muq.onrender.com/api/images?q=${userQuery}`
       );
       images = response.data;
-      console.log("Fetched images:", images);
+      // console.log("Fetched images:", images);
+      const imageUrls = images.map((img) => img.link).filter(Boolean);
+      // console.log("Image URLs:", imageUrls);
 
-      await updateWord(userQuery); // 🔼 update Firestore
-      nodes = await fetchWords(); // ⬇️ re-fetch updated nodes
-      trending = await fetchTrendingWords(5);
-      buildLinks();
-      restartSimulation();
+      // Call backend geolocation API
+      let geoData = [];
+      if (imageUrls.length > 0) {
+        try {
+          const geoResponse = await axios.post(
+            "https://great-wave-api-1muq.onrender.com/api/geolocate",
+            { urls: imageUrls }
+          );
+          geoData = geoResponse.data;
+          console.log("Geolocation API data:", geoData);
+        } catch (geoError) {
+          // console.error("Geolocation API error:", geoError);
+        }
+      }
+      // Filter out locations with null/undefined or (0,0) coordinates
+      serverLocations = geoData.filter((loc) => {
+        if (loc == null) return false;
+        const lat = Number(loc.lat);
+        const lng = Number(loc.lng);
+        if (isNaN(lat) || isNaN(lng)) return false;
+        // Exclude (0,0) and nullish
+        if (lat === 0 && lng === 0) return false;
+        return true;
+      });
+      // console.log("Final server locations:", serverLocations);
+
+      try {
+        await updateWord(userQuery); // 🔼 update Firestore
+        nodes = await fetchWords(); // ⬇️ re-fetch updated nodes
+        trending = await fetchTrendingWords(5);
+        buildLinks();
+        restartSimulation();
+      } catch (firebaseError) {
+        console.warn("Firebase update failed:", firebaseError);
+        // Continue without updating word cloud
+      }
+
       userQuery = "";
     } catch (error) {
       console.error("Error fetching images", error);
@@ -120,41 +237,135 @@
   {/if}
 
   <div class="header">
-    <img src="src/main-image.jpeg" alt="Great Wave" />
+    <img src="/great-wave-everywhere/main-image.jpeg" alt="Great Wave" />
     <div>
       <div class="title">
         GREAT WAVE <span style="color: #F0BF91;"> REMIX</span>
       </div>
 
       <p class="subtitle">
-        Discover Hokusai's "Great Wave off Kanagawa" in diverse contexts
+        Discover Hokusai's "Great Wave off Kanagawa" in diverse and unexpected contexts
         worldwide. Search for any term to see how this iconic artwork appears
-        across various themes and locations.
+        in images across various topics and countries.
       </p>
     </div>
   </div>
+  <div class="header-piping"></div>
 
   <h1>
-    Hokusai's legendary <span class="italic">Great Wave off Kanagawa</span> can
-    be
+    HOKUSAI'S <em class="italic">GREAT WAVE</em> CAN BE
     <input type="text" bind:value={userQuery} placeholder="ANYTHING" />
     <div class="search-container">
       <div class="button-wrapper">
-        <button on:click={fetchImages}>Search</button>
+        <button onclick={fetchImages}>Search</button>
       </div>
       <div class="call-to-action">No images yet — try a search!</div>
     </div>
   </h1>
   <div class="main-grid">
     <div class="left-column">
+      <!-- WORLD MAP COMPONENT -->
+      <div class="map-container">
+        <!-- <h3>Great Wave image locations</h3> -->
+
+        <!-- Debug info -->
+        <!-- <div class="debug-info">
+          <p>Map data loaded: {worldMapData ? "Yes" : "No"}</p>
+          <p>Server locations: {serverLocations.length}</p>
+        </div> -->
+
+        {#if worldMapData}
+          {@const projection = d3
+            .geoNaturalEarth1()
+            .scale(40)
+            .translate([100, 62.5])}
+          {@const pathGenerator = d3.geoPath().projection(projection)}
+
+          <svg width="200" height="125" viewBox="0 0 200 125" class="world-map">
+            <!-- Render world countries -->
+            {#each worldMapData.features as country, index}
+              {@const pathData = pathGenerator(country)}
+              {#if pathData}
+                <path
+                  d={pathData}
+                  fill="#ADC2CE"
+                  stroke="#377293"
+                  stroke-width="0.5"
+                />
+              {:else}
+                <!-- Debug: log countries with no path data -->
+                {console.log(
+                  `No path data for country ${index}:`,
+                  country.geometry?.type
+                )}
+              {/if}
+            {/each}
+
+            <!-- Render server location pins -->
+            {#if serverLocations.length > 0}
+              {#each serverLocations as location}
+                {console.log(location)}
+                {@const coords = projection([location.lng, location.lat])}
+                {#if coords}
+                  <g
+                    class="location-pin"
+                    onmouseover={() => {
+                      // Note: We use location.domain directly here based on your object!
+                      isHovered = location.domain;
+                      console.log("Pin Domain:", isHovered);
+                    }}
+                    onmouseout={() => (isHovered = null)}
+                  >
+                    <circle
+                      class="pin"
+                      cx={coords[0]}
+                      cy={coords[1]}
+                      r={isHovered === location.domain ? 7 : 4}
+                      fill={isHovered === location.domain
+                        ? "#ff4500"
+                        : "#ff6b35"}
+                    />
+                  </g>
+                {/if}
+              {/each}
+            {/if}
+          </svg>
+
+          <p class="map-caption">
+            {#if serverLocations.length > 0}
+              Rollover to see server locations
+              <!-- {:else}
+              Search for images to see their server locations -->
+            {/if}
+          </p>
+        {:else}
+          <p>Loading world map...</p>
+        {/if}
+      </div>
+      <!-- IMAGE GALLERY -->
       {#if images.length > 0}
         <div class="image-container">
           {#each images as img}
             <div class="image-with-title">
               <a href={img.link} target="_blank" rel="noopener noreferrer">
-                <img src={img.link} alt={img.title} />
+                <img
+                  src={img.link}
+                  onmouseover={() => {
+                    isHovered = getDomain(img.link);
+                    console.log("Hovered Domain:", isHovered);
+                  }}
+                  onmouseout={() => (isHovered = null)}
+                  style="border: {isHovered === getDomain(img.link)
+                    ? '2px solid #ff6b35'
+                    : 'none'};"
+                />
               </a>
-              <div class="image-title-box">
+              <div
+                class="image-title-box"
+                style="background: {isHovered === normalizeUrl(img.link)
+                  ? '#ffe5d0'
+                  : '#f9f9f9'};"
+              >
                 {@html `<textarea readonly rows='2'>${img.title}</textarea>`}
               </div>
             </div>
@@ -169,8 +380,8 @@
 
     <div class="right-column">
       <div class="word-cloud-container">
-        <h2>Trending</h2>
-        <svg width="100%" height="600" viewBox="0 0 400 600">
+        <h3>Trending topics</h3>
+        <svg width="100%" height="400" viewBox="0 0 400 400">
           <!-- Define drop shadow filter -->
           <defs>
             <filter
@@ -188,39 +399,40 @@
               />
             </filter>
           </defs>
-          <!-- Render links -->
-          {#each links as link}
-            <!-- {console.log(link)}        git add .
-        git commit -m "Add detailed error logging to /api/images"
-        git push -->
-            {#if getNodeById(link.source) && getNodeById(link.target)}
-              <line
-                x1={getLinkCoordinates(link).x1}
-                y1={getLinkCoordinates(link).y1}
-                x2={getLinkCoordinates(link).x2}
-                y2={getLinkCoordinates(link).y2}
-                stroke="#fff"
-                stroke-opacity="0.6"
-                stroke-width="2"
-              />
-            {/if}
-          {/each}
+          <g style="transform: translate(0, -100px)">
+            <!-- Render links -->
+            {#each links as link}
+              <!-- {console.log(link)} -->
 
-          <!-- Render nodes as text -->
-          {#each nodes as node}
-            <text
-              x={node.x}
-              y={node.y}
-              font-size={`${10 * node.count}px`}
-              fill="steelblue"
-              text-anchor="middle"
-              alignment-baseline="middle"
-              filter="url(#dropshadow)"
-              on:mouseover={() => console.log(node.id)}
-            >
-              {node.id}
-            </text>
-          {/each}
+              {#if getNodeById(link.source) && getNodeById(link.target)}
+                <line
+                  x1={getLinkCoordinates(link).x1}
+                  y1={getLinkCoordinates(link).y1}
+                  x2={getLinkCoordinates(link).x2}
+                  y2={getLinkCoordinates(link).y2}
+                  stroke="#fff"
+                  stroke-opacity="0.6"
+                  stroke-width="2"
+                />
+              {/if}
+            {/each}
+
+            <!-- Render nodes as text -->
+            {#each nodes as node}
+              <text
+                x={node.x}
+                y={node.y}
+                font-size={`${10 * node.count}px`}
+                fill="steelblue"
+                text-anchor="middle"
+                alignment-baseline="middle"
+                filter="url(#dropshadow)"
+                onmouseover={() => console.log(node.id)}
+              >
+                {node.id}
+              </text>
+            {/each}
+          </g>
         </svg>
 
         <div class="trending-panel">
@@ -258,15 +470,28 @@
 <style>
   @import url("https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400&family=Montserrat:wght@300;400;500;600;700&display=swap");
 
+  title,
+  .map-caption {
+    font-family: montserrat, sans-serif;
+    font-size: 0.9rem;
+    color: #377293;
+  }
+  h3 {
+    font-family: monserrat, sans-serif;
+    font-size: 1.5rem;
+    margin: 0;
+    padding: 0;
+    color: #377293;
+  }
   .title {
     font-family: monserrat, sans-serif;
-    font-size: 3.5rem;
+    font-size: 3.8rem;
     font-weight: 800;
     color: #377293;
   }
   .subtitle {
     font-family: monserrat, sans-serif;
-    font-size: 1.5rem;
+    font-size: 1.1rem;
     font-weight: 300;
     color: #377293;
   }
@@ -275,10 +500,19 @@
     grid-template-columns: minmax(300px, 1fr) 1.5fr;
     align-items: center;
     text-align: left;
-    margin-bottom: 2rem;
+    margin-bottom: 1.5rem;
     gap: 2rem;
-    max-width: 1200px;
+    max-width: 1800px;
     width: 100%;
+  }
+
+  .header-piping {
+    width: 100%;
+    height: 4px;
+    background: #adc2ce;
+    border-radius: 2px;
+    margin: 0.5rem 0 1.5rem 0;
+    opacity: 0.5;
   }
   .bottom-panel {
     display: flex;
@@ -351,7 +585,7 @@
     gap: 2rem;
     width: 100%;
     /* max-width: 1200px; */
-    margin: 2rem auto;
+    margin: 0 auto;
   }
 
   .left-column {
@@ -375,7 +609,7 @@
 
   .image-container {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 2fr));
     gap: 1rem;
     justify-items: center;
     align-items: start;
@@ -448,7 +682,7 @@
   }
 
   input {
-    width: 200px;
+    width: 8%;
     padding: 0.5rem;
     margin: 1rem;
     border-radius: 5px;
@@ -495,8 +729,10 @@
 
   h1 {
     color: #377293;
+    font-size: 2rem;
     font-family: "Noto Sans", sans-serif;
     text-align: left;
+    margin: 0.5rem 0;
   }
 
   :global(#app) {
@@ -515,18 +751,19 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 2rem 5rem;
+    padding: 1rem 5rem;
   }
 
   .header img {
     width: 100%;
     height: auto;
     max-width: 100%;
+    max-height: 200px;
     margin: 0;
     box-shadow:
       2px 4px 12px rgba(0, 0, 0, 0.15),
       0 2px 4px rgba(0, 0, 0, 0.1);
-    border-radius: 8px;
+    border-radius: 2px;
     object-fit: cover;
   }
 
@@ -537,7 +774,7 @@
   }
 
   svg {
-    margin-top: 2rem;
+    margin-top: 0.5rem;
     /* border: 1px solid #ccc; */
   }
 
@@ -591,5 +828,46 @@
     border: 2px solid #ccc;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     margin: 1rem 0;
+  }
+
+  .map-container {
+    position: relative;
+    padding: 0;
+    margin: 0;
+    text-align: left;
+  }
+
+  .world-map {
+    /* No background - show body background */
+  }
+
+  .location-pin .pin {
+    cursor: pointer;
+    transition: r 0.2s ease;
+  }
+
+  .location-pin:hover .pin {
+    r: 6;
+    fill: #ff4500;
+  }
+
+  .map-caption {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    color: #666;
+    font-style: italic;
+  }
+
+  .debug-info {
+    background-color: #fff3cd;
+    border: 1px solid #ffeaa7;
+    padding: 0.5rem;
+    margin: 0.5rem 0;
+    border-radius: 4px;
+    font-size: 0.8rem;
+  }
+
+  .debug-info p {
+    margin: 0.2rem 0;
   }
 </style>
