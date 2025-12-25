@@ -1,4 +1,25 @@
 <script>
+  import { onDestroy } from "svelte";
+  let currentHeaderIndex = $state(0);
+  let intervalId;
+
+  const headerImages = [
+    "/great-wave-everywhere/main-image.jpeg",
+    "/great-wave-everywhere/Hokusai-Great_Wave_off_Kanagawa-cat-end.jpg",
+    "/great-wave-everywhere/tomoko_nagao_hokusai-the_great_wave_of_kanagawa_with_mc_cupnoodle_kewpie_kikkoman_and_kitty_2012_digital_art_50_x_70_cm-_70_x_100_cm.jpe_3.jpg",
+    "/great-wave-everywhere/135e9cb8ff232a9c7e1f1be108eb670f.jpg",
+    "/great-wave-everywhere/2372ef58832305.5a0b25df284b7.jpg.webp",
+    "/great-wave-everywhere/image_BT0qjFvT31.png.jpeg",
+  ];
+
+  onMount(() => {
+    intervalId = setInterval(() => {
+      currentHeaderIndex = (currentHeaderIndex + 1) % headerImages.length;
+    }, 5000);
+  });
+  onDestroy(() => {
+    clearInterval(intervalId);
+  });
   import { fetchWords, updateWord, fetchTrendingWords } from "./api";
 
   import { onMount } from "svelte";
@@ -44,6 +65,8 @@
   let loading = $state(false);
   let serverLocations = $state([]);
   let worldMapData = $state(null);
+
+  let hoveredLocationText = $state("");
 
   async function loadWorldMap() {
     try {
@@ -109,6 +132,7 @@
     }
   });
 
+  // Fetch images based on user query and update geolocation data
   async function fetchImages() {
     if (!userQuery) return;
 
@@ -167,6 +191,7 @@
     }
   }
 
+  // Word cloud functions
   function buildLinks() {
     links = [];
     for (let i = 1; i < nodes.length; i++) {
@@ -236,17 +261,28 @@
     <div class="loading-indicator">Loading...</div>
   {/if}
 
+  <!-- HEADER -->
   <div class="header">
-    <img src="/great-wave-everywhere/main-image.jpeg" alt="Great Wave" />
+    <div class="header-image-crossfade">
+      {#each headerImages as img, i}
+        <img
+          src={img}
+          alt="Header image"
+          class:visible={currentHeaderIndex === i}
+          class:hidden={currentHeaderIndex !== i}
+        />
+      {/each}
+    </div>
     <div>
+      <!-- MAIN BODY -->
       <div class="title">
         GREAT WAVE <span style="color: #F0BF91;"> REMIX</span>
       </div>
 
       <p class="subtitle">
-        Discover Hokusai's "Great Wave off Kanagawa" in diverse and unexpected contexts
-        worldwide. Search for any term to see how this iconic artwork appears
-        in images across various topics and countries.
+        Discover Hokusai's "Great Wave off Kanagawa" in diverse and unexpected
+        contexts worldwide. Search for any term to see how this iconic Japanese
+        artwork has been reimagined in images spanning nations and cultures.
       </p>
     </div>
   </div>
@@ -254,7 +290,14 @@
 
   <h1>
     HOKUSAI'S <em class="italic">GREAT WAVE</em> CAN BE
-    <input type="text" bind:value={userQuery} placeholder="ANYTHING" />
+    <input
+      type="text"
+      bind:value={userQuery}
+      placeholder="ANYTHING"
+      onkeydown={(e) => {
+        if (e.key === "Enter") fetchImages();
+      }}
+    />
     <div class="search-container">
       <div class="button-wrapper">
         <button onclick={fetchImages}>Search</button>
@@ -266,15 +309,7 @@
     <div class="left-column">
       <!-- WORLD MAP COMPONENT -->
       <div class="map-container">
-        <!-- <h3>Great Wave image locations</h3> -->
-
-        <!-- Debug info -->
-        <!-- <div class="debug-info">
-          <p>Map data loaded: {worldMapData ? "Yes" : "No"}</p>
-          <p>Server locations: {serverLocations.length}</p>
-        </div> -->
-
-        {#if worldMapData}
+        {#if images.length > 0 && worldMapData}
           {@const projection = d3
             .geoNaturalEarth1()
             .scale(40)
@@ -310,11 +345,14 @@
                   <g
                     class="location-pin"
                     onmouseover={() => {
-                      // Note: We use location.domain directly here based on your object!
                       isHovered = location.domain;
-                      console.log("Pin Domain:", isHovered);
+                      hoveredLocationText =
+                        location.city || location.country || "Unknown location";
                     }}
-                    onmouseout={() => (isHovered = null)}
+                    onmouseout={() => {
+                      isHovered = null;
+                      hoveredLocationText = "";
+                    }}
                   >
                     <circle
                       class="pin"
@@ -330,20 +368,22 @@
               {/each}
             {/if}
           </svg>
-
-          <p class="map-caption">
-            {#if serverLocations.length > 0}
-              Rollover to see server locations
-              <!-- {:else}
-              Search for images to see their server locations -->
-            {/if}
-          </p>
-        {:else}
-          <p>Loading world map...</p>
         {/if}
       </div>
       <!-- IMAGE GALLERY -->
       {#if images.length > 0}
+        <div
+          style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;"
+        >
+          <span style="color: #377293; font-weight: bold; font-size: 0.95rem;"
+            >Rollover for image locations</span
+          >
+          {#if hoveredLocationText}
+            <span style="color: #377293; font-weight: bold; font-size: 0.95rem;"
+              >{hoveredLocationText}</span
+            >
+          {/if}
+        </div>
         <div class="image-container">
           {#each images as img}
             <div class="image-with-title">
@@ -352,9 +392,22 @@
                   src={img.link}
                   onmouseover={() => {
                     isHovered = getDomain(img.link);
+                    // Find the matching server location for this image
+                    const loc = serverLocations.find(
+                      (l) => l.domain === isHovered
+                    );
+                    hoveredLocationText = loc
+                      ? loc.city ||
+                        loc.country ||
+                        loc.domain ||
+                        "Unknown location"
+                      : isHovered || "Unknown location";
                     console.log("Hovered Domain:", isHovered);
                   }}
-                  onmouseout={() => (isHovered = null)}
+                  onmouseout={() => {
+                    isHovered = null;
+                    hoveredLocationText = "";
+                  }}
                   style="border: {isHovered === getDomain(img.link)
                     ? '2px solid #ff6b35'
                     : 'none'};"
@@ -468,6 +521,39 @@
 </main>
 
 <style>
+  .header-image-crossfade {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    height: 200px;
+    min-width: 300px;
+    min-height: 100px;
+  }
+  .header-image-crossfade img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 2px;
+    box-shadow:
+      2px 4px 12px rgba(0, 0, 0, 0.15),
+      0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 0;
+    z-index: 1;
+  }
+  .header-image-crossfade img.visible {
+    opacity: 1;
+    z-index: 2;
+    pointer-events: auto;
+  }
+  .header-image-crossfade img.hidden {
+    opacity: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
   @import url("https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400&family=Montserrat:wght@300;400;500;600;700&display=swap");
 
   title,
@@ -508,7 +594,7 @@
 
   .header-piping {
     width: 100%;
-    height: 4px;
+    height: 2px;
     background: #adc2ce;
     border-radius: 2px;
     margin: 0.5rem 0 1.5rem 0;
@@ -544,7 +630,7 @@
   }
 
   .image-title-box textarea {
-    font-family: "Noto Sans", sans-serif;
+    font-family: montserrat, sans-serif;
     font-size: 12px;
     width: 180px;
     margin-top: 0.25rem;
@@ -620,7 +706,7 @@
     align-items: center;
     justify-content: center;
     height: 300px;
-    color: #666;
+    color: #377293;
     font-style: italic;
     text-align: center;
   }
@@ -682,11 +768,11 @@
   }
 
   input {
-    width: 8%;
+    width: 10%;
     padding: 0.5rem;
     margin: 1rem;
     border-radius: 5px;
-    border: 1px solid #d4c5a9;
+    border: 1px solid #377293;
     background-color: #f7f1e4;
     color: #377293;
     font-size: 1rem;
@@ -717,8 +803,9 @@
   }
 
   .call-to-action {
-    color: #555;
+    color: #377293;
     font-size: 1rem;
+    font-family: montserrat, sans-serif;
     display: flex;
     align-items: center;
   }
@@ -730,7 +817,7 @@
   h1 {
     color: #377293;
     font-size: 2rem;
-    font-family: "Noto Sans", sans-serif;
+    font-family: montserrat, sans-serif;
     text-align: left;
     margin: 0.5rem 0;
   }
@@ -742,6 +829,7 @@
 
   :global(body) {
     background-color: #f7f1e4;
+    font-family: montserrat, sans-serif;
     margin: 0;
     padding: 0;
   }
