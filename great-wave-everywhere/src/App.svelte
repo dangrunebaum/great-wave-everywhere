@@ -1,8 +1,24 @@
 <script>
-  import { onDestroy } from "svelte";
-  let currentHeaderIndex = $state(0);
-  let intervalId;
+  // --- Imports ---
+  import { onDestroy, onMount } from "svelte";
+  import axios from "axios";
+  import * as d3 from "d3";
+  import * as topojson from "topojson-client";
+  import {
+    fetchWords,
+    updateWord,
+    fetchTrendingWords,
+    fetchImagesForWord,
+  } from "./api";
+  // import { collection, getDocs } from "firebase/firestore";
+  // import { db } from "./firebase";
 
+  // --- State Variables ---
+  let currentHeaderIndex = $state(0); // For rotating header images
+  let intervalId; // Interval for header image rotation
+  // Remove selectedWord and wordImages; use images for both search and word click
+
+  // --- Header Images ---
   const headerImages = [
     "/great-wave-everywhere/main-image.jpeg",
     "/great-wave-everywhere/Hokusai-Great_Wave_off_Kanagawa-cat-end.jpg",
@@ -12,6 +28,7 @@
     "/great-wave-everywhere/image_BT0qjFvT31.png.jpeg",
   ];
 
+  // --- Header Image Rotation ---
   onMount(() => {
     intervalId = setInterval(() => {
       currentHeaderIndex = (currentHeaderIndex + 1) % headerImages.length;
@@ -20,18 +37,45 @@
   onDestroy(() => {
     clearInterval(intervalId);
   });
-  import { fetchWords, updateWord, fetchTrendingWords } from "./api";
 
-  import { onMount } from "svelte";
-  import axios from "axios";
-  import * as d3 from "d3";
-  import * as topojson from "topojson-client";
+  // --- Image Search and Word Cloud ---
+  /**
+   * When a word is clicked, fetch its images and replace the main images array
+   */
+  async function handleWordClick(word) {
+    images = await fetchImagesForWord(word);
+    userQuery = "";
+    // Geolocate image servers for word click
+    const imageUrls = images.map((img) => img.link).filter(Boolean);
+    let geoData = [];
+    if (imageUrls.length > 0) {
+      try {
+        const geoResponse = await axios.post(
+          "https://great-wave-api-1muq.onrender.com/api/geolocate",
+          { urls: imageUrls }
+        );
+        geoData = geoResponse.data;
+      } catch (geoError) {
+        // Geolocation API error
+      }
+    }
+    serverLocations = geoData.filter((loc) => {
+      if (loc == null) return false;
+      const lat = Number(loc.lat);
+      const lng = Number(loc.lng);
+      if (isNaN(lat) || isNaN(lng)) return false;
+      if (lat === 0 && lng === 0) return false;
+      return true;
+    });
+  }
 
-  // FIXED: Return null if url is missing so we don't match empty strings
+  /**
+   * Normalize a URL for domain matching
+   */
   function normalizeUrl(url) {
     if (!url) return null;
     try {
-      // This removes protocol (http), query strings (?abc=123), and trailing slashes
+      // Remove protocol, query strings, and trailing slashes
       const clean = url
         .replace(/^https?:\/\//, "")
         .split("?")[0]
@@ -42,59 +86,54 @@
     }
   }
 
+  /**
+   * Extract domain from a URL
+   */
   function getDomain(url) {
     if (!url) return null;
     try {
-      // If it's already a domain (no http), the URL constructor might fail,
-      // so we ensure it has a protocol for parsing.
       const fullUrl = url.startsWith("http") ? url : `https://${url}`;
       return new URL(fullUrl).hostname;
     } catch (e) {
-      // Fallback: if URL parsing fails, return the raw string
       return url;
     }
   }
 
-  let isHovered = $state(null);
-  let images = $state([]);
-  let userQuery = $state("");
-  let nodes = $state([]);
-  let links = $state([]);
-  let simulation;
-  let trending = $state([]);
-  let loading = $state(false);
-  let serverLocations = $state([]);
-  let worldMapData = $state(null);
+  // --- UI State ---
+  let isHovered = $state(null); // Track hovered domain/location
+  let images = $state([]); // Images from search
+  let userQuery = $state(""); // User's search input
+  let nodes = $state([]); // Word cloud nodes
+  let links = $state([]); // Word cloud links
+  let simulation; // D3 simulation
+  let trending = $state([]); // Trending words
+  let loading = $state(false); // Loading indicator
+  let serverLocations = $state([]); // Geolocated image servers
+  let worldMapData = $state(null); // GeoJSON for world map
+  let hoveredLocationText = $state(""); // Tooltip for hovered location
 
-  let hoveredLocationText = $state("");
+  // --- Firestore Backup (Disabled) ---
+  // Saving Firestore 'words' collection as JSON is no longer needed.
+  // async function downloadWordsCollection() { ... }
 
+  // --- World Map Loader ---
+  /**
+   * Load world map data (TopoJSON → GeoJSON)
+   */
   async function loadWorldMap() {
     try {
-      // console.log("Loading world map data...");
       const response = await fetch(
         "/great-wave-everywhere/ne_110m_admin_0_countries.json"
       );
-
-      // console.log("Fetch response:", response.status, response.statusText);
-
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-
       const topoData = await response.json();
-      // console.log("TopoJSON data loaded");
-      // console.log("Objects in topology:", Object.keys(topoData.objects));
-
-      // Convert TopoJSON to GeoJSON
       const objectName = Object.keys(topoData.objects)[0];
       worldMapData = topojson.feature(topoData, topoData.objects[objectName]);
-      // console.log("Converted to GeoJSON format");
-      // console.log("Number of countries:", worldMapData.features.length);
     } catch (error) {
-      // console.error("Error loading world map data:", error);
       // Try alternative path
       try {
-        // console.log("Trying alternative path...");
         const response = await fetch("/ne_110m_admin_0_countries.json");
         if (response.ok) {
           const topoData = await response.json();
@@ -103,15 +142,17 @@
             topoData,
             topoData.objects[objectName]
           );
-          // console.log("World map loaded from alternative path");
         }
       } catch (altError) {
-        // console.error("Alternative path also failed:", altError);
+        // Both paths failed
       }
     }
   }
 
-  // 🔁 Load existing words from Firestore on mount
+  // --- Initial Data Load ---
+  /**
+   * On mount, load words, trending topics, and world map
+   */
   onMount(async () => {
     loading = true;
     try {
@@ -122,7 +163,6 @@
         restartSimulation();
       } catch (firebaseError) {
         console.warn("Firebase connection failed:", firebaseError);
-        // Continue with empty data
         nodes = [];
         trending = [];
       }
@@ -132,21 +172,20 @@
     }
   });
 
-  // Fetch images based on user query and update geolocation data
+  // --- Image Search ---
+  /**
+   * Fetch images for user query and update geolocation data
+   */
   async function fetchImages() {
     if (!userQuery) return;
-
     loading = true;
     try {
       const response = await axios.get(
         `https://great-wave-api-1muq.onrender.com/api/images?q=${userQuery}`
       );
       images = response.data;
-      // console.log("Fetched images:", images);
       const imageUrls = images.map((img) => img.link).filter(Boolean);
-      // console.log("Image URLs:", imageUrls);
-
-      // Call backend geolocation API
+      // Geolocate image servers
       let geoData = [];
       if (imageUrls.length > 0) {
         try {
@@ -157,32 +196,28 @@
           geoData = geoResponse.data;
           console.log("Geolocation API data:", geoData);
         } catch (geoError) {
-          // console.error("Geolocation API error:", geoError);
+          // Geolocation API error
         }
       }
-      // Filter out locations with null/undefined or (0,0) coordinates
+      // Filter valid server locations
       serverLocations = geoData.filter((loc) => {
         if (loc == null) return false;
         const lat = Number(loc.lat);
         const lng = Number(loc.lng);
         if (isNaN(lat) || isNaN(lng)) return false;
-        // Exclude (0,0) and nullish
         if (lat === 0 && lng === 0) return false;
         return true;
       });
-      // console.log("Final server locations:", serverLocations);
-
+      // Update word cloud
       try {
-        await updateWord(userQuery); // 🔼 update Firestore
-        nodes = await fetchWords(); // ⬇️ re-fetch updated nodes
+        await updateWord(userQuery); // Update Firestore
+        nodes = await fetchWords(); // Re-fetch updated nodes
         trending = await fetchTrendingWords(5);
         buildLinks();
         restartSimulation();
       } catch (firebaseError) {
         console.warn("Firebase update failed:", firebaseError);
-        // Continue without updating word cloud
       }
-
       userQuery = "";
     } catch (error) {
       console.error("Error fetching images", error);
@@ -191,7 +226,10 @@
     }
   }
 
-  // Word cloud functions
+  // --- Word Cloud Graph ---
+  /**
+   * Build links between word cloud nodes
+   */
   function buildLinks() {
     links = [];
     for (let i = 1; i < nodes.length; i++) {
@@ -199,10 +237,11 @@
     }
   }
 
+  /**
+   * Restart D3 simulation for word cloud
+   */
   function restartSimulation() {
-    // Find the maximum count to normalize the gravity force
     const maxCount = Math.max(...nodes.map((n) => n.count));
-
     simulation = d3
       .forceSimulation(nodes)
       .force(
@@ -212,24 +251,22 @@
           .id((d) => d.id)
           .distance(25)
       )
-      .force("charge", d3.forceManyBody().strength(-100)) // reduced repulsion
-      .force("center", d3.forceCenter(200, 300)) // center in SVG (400x600)
+      .force("charge", d3.forceManyBody().strength(-100))
+      .force("center", d3.forceCenter(200, 300))
       .force(
         "gravity",
         d3
           .forceRadial(
             (d) => {
-              // Higher count = smaller radius (closer to center)
               const normalizedCount = d.count / maxCount;
-              return 150 * (1 - normalizedCount); // 0-100px from center based on count
+              return 150 * (1 - normalizedCount);
             },
             200,
             300
           )
           .strength(0.5)
-      ) // stronger gravity force
+      )
       .force("boundary", () => {
-        // Keep nodes within SVG bounds
         nodes.forEach((node) => {
           node.x = Math.max(20, Math.min(380, node.x || 0));
           node.y = Math.max(20, Math.min(580, node.y || 0));
@@ -240,10 +277,16 @@
       });
   }
 
+  /**
+   * Get node by ID from word cloud
+   */
   function getNodeById(id) {
     return nodes.find((node) => node.id === id);
   }
 
+  /**
+   * Get coordinates for a link between nodes
+   */
   function getLinkCoordinates(link) {
     const sourceNode = getNodeById(link.source);
     const targetNode = getNodeById(link.target);
@@ -261,6 +304,8 @@
     <div class="loading-indicator">Loading...</div>
   {/if}
 
+  <!-- Download Words Collection button removed as saving is no longer needed -->
+
   <!-- HEADER -->
   <div class="header">
     <div class="header-image-crossfade">
@@ -274,20 +319,22 @@
       {/each}
     </div>
     <div>
-      <!-- MAIN BODY -->
+      <!-- HEADER -->
       <div class="title">
         GREAT WAVE <span style="color: #F0BF91;"> REMIX</span>
       </div>
 
       <p class="subtitle">
-        Discover Hokusai's "Great Wave off Kanagawa" in diverse and unexpected
-        contexts worldwide. Search for any term to see how this iconic Japanese
-        artwork has been reimagined in images spanning nations and cultures.
+        Discover Hokusai's "Great Wave off Kanagawa" in unexpected contexts
+        worldwide. Search Google Images for any term you associate with this
+        iconic Japanese artwork to see how it has been reimagined in formats
+        spanning diverse topics and cultures.
       </p>
     </div>
   </div>
   <div class="header-piping"></div>
 
+  <!-- MAIN BODY -->
   <h1>
     HOKUSAI'S <em class="italic">GREAT WAVE</em> CAN BE
     <input
@@ -300,9 +347,9 @@
     />
     <div class="search-container">
       <div class="button-wrapper">
-        <button onclick={fetchImages}>Search</button>
+        <button onclick={fetchImages}>Remix</button>
       </div>
-      <div class="call-to-action">No images yet — try a search!</div>
+      <div class="call-to-action">No images yet — enter a search term!</div>
     </div>
   </h1>
   <div class="main-grid">
@@ -370,13 +417,13 @@
           </svg>
         {/if}
       </div>
-      <!-- IMAGE GALLERY -->
+      <!-- IMAGE GALLERY: Show images from search or word click -->
       {#if images.length > 0}
         <div
           style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;"
         >
           <span style="color: #377293; font-weight: bold; font-size: 0.95rem;"
-            >Rollover for image locations</span
+            >Hover for image server locations:</span
           >
           {#if hoveredLocationText}
             <span style="color: #377293; font-weight: bold; font-size: 0.95rem;"
@@ -390,9 +437,11 @@
               <a href={img.link} target="_blank" rel="noopener noreferrer">
                 <img
                   src={img.link}
+                  onerror={(e) => {
+                    e.target.src = "";
+                  }}
                   onmouseover={() => {
                     isHovered = getDomain(img.link);
-                    // Find the matching server location for this image
                     const loc = serverLocations.find(
                       (l) => l.domain === isHovered
                     );
@@ -408,9 +457,7 @@
                     isHovered = null;
                     hoveredLocationText = "";
                   }}
-                  style="border: {isHovered === getDomain(img.link)
-                    ? '2px solid #ff6b35'
-                    : 'none'};"
+                  style=""
                 />
               </a>
               <div
@@ -424,17 +471,23 @@
             </div>
           {/each}
         </div>
-      {:else}
+      {/if}
+      {#if images.length === 0}
         <div class="no-images-placeholder">
-          <p>Your search results will appear here</p>
+          <p>
+            Enter a search term above to query Google Images for "Great Wave off
+            Kanagawa + [your search term]." Your search results will appear
+            here.
+          </p>
         </div>
       {/if}
     </div>
 
+    <!-- WORD CLOUD AND TRENDING TOPICS -->
     <div class="right-column">
       <div class="word-cloud-container">
-        <h3>Trending topics</h3>
-        <svg width="100%" height="400" viewBox="0 0 400 400">
+        <div class="call-to-action">Or click on a trending topic!</div>
+        <svg width="120%" height="400" viewBox="0 0 480 400">
           <!-- Define drop shadow filter -->
           <defs>
             <filter
@@ -475,12 +528,20 @@
               <text
                 x={node.x}
                 y={node.y}
-                font-size={`${10 * node.count}px`}
+                font-size={`${8 + node.count}px`}
                 fill="steelblue"
                 text-anchor="middle"
                 alignment-baseline="middle"
                 filter="url(#dropshadow)"
-                onmouseover={() => console.log(node.id)}
+                onclick={() => handleWordClick(node.id)}
+                onmouseover={(e) => {
+                  e.target.style.fill = "#ff6b35";
+                  e.target.style.cursor = "pointer";
+                }}
+                onmouseout={(e) => {
+                  e.target.style.fill = "steelblue";
+                }}
+                style="cursor: pointer;"
               >
                 {node.id}
               </text>
@@ -498,15 +559,56 @@
       </div>
     </div>
   </div>
-  <h2>
-    Google Ngram Viewer shows a steady rise in mentions of "Great Wave off
-    Kanagawa"
-  </h2>
+
+  <!-- GOOGLE NGRAM VIEWER SECTION -->
+  <div style="text-align: left; color: #377293; padding-top: 5rem;">
+    <!-- <h2>
+      Google Ngram Viewer shows a steady rise in mentions of "Great Wave off
+      Kanagawa"
+    </h2> -->
+    <h2>Why remix the "Great Wave?"</h2>
+    This project explores the impact of Hokusai's iconic artwork, allowing users
+    to see for themselves how it continues to reverberate worldwide. Two centuries
+    since its creation around 1831, scholars say Hokusai’s print is possibly the
+    most reproduced image in the history of art, with global recognition far beyond
+    its original Japanese audience.
+  </div>
   <div class="bottom-panel">
     <div class="chart-container">
-      <iframe
+      <div>
+        <p>
+          The exponential-like rise in frequency of the phrase “Great Wave off
+          Kanagawa” in millions of Google Books shows references to the artwork
+          appearing more frequently over time, reflecting Japan's rise as a
+          cultural superpower.
+        </p>
+        <p>
+          The print helped spark Japonisme in the West (influencing Monet, van
+          Gogh, and others), and that early cultural exchange laid the
+          foundation for global fame. European artists and critics rediscovered
+          Japanese woodblocks after Japan opened to trade in the 19th century,
+          elevating Hokusai’s work in Western art circles.
+        </p>
+        <p>
+          "Great Wave" now appears everywhere — from high fashion and novelty
+          goods to digital art, emojis, and even LEGO sets. It was chosen for
+          the 2024 Japanese 1,000-yen note — a highly public national symbol.
+        </p>
+      </div>
+      <div>
+        <p class="chart-title">
+          Mentions of "Great Wave off Kanagawa" over time
+        </p>
+        <img
+          src="public/ngram_chart_great_wave_off_kanagawa.png"
+          alt="Google Ngram Viewer chart for 'Great Wave off Kanagawa'"
+          class="ngram-chart"
+        />
+        <p>Source: Google Books Ngram Viewer, English corpus, 1900–2022</p>
+      </div>
+      <!-- <iframe
         name="ngram_chart"
-        src="https://books.google.com/ngrams/interactive_chart?content=Great+Wave+off+Kanagawa&year_start=1800&year_end=2022&corpus=en&smoothing=3"
+        src="https://books.google.com/ngrams/interactive_chart?content=Great+Wave+off+Kanagawa&year_start=1900&year_end=2022&corpus=en&smoothing=3"
         width="900"
         height="400"
         marginwidth="50"
@@ -515,7 +617,7 @@
         vspace="0"
         frameborder="0"
         scrolling="no"
-      ></iframe>
+      ></iframe> -->
     </div>
   </div>
 </main>
@@ -524,10 +626,13 @@
   .header-image-crossfade {
     position: relative;
     width: 100%;
-    max-width: 100%;
-    height: 200px;
-    min-width: 300px;
+    aspect-ratio: 16/6;
     min-height: 100px;
+    max-height: 300px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .header-image-crossfade img {
     position: absolute;
@@ -543,6 +648,8 @@
     transition: opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1);
     opacity: 0;
     z-index: 1;
+    max-width: 100vw;
+    max-height: 100%;
   }
   .header-image-crossfade img.visible {
     opacity: 1;
@@ -553,6 +660,24 @@
     opacity: 0;
     z-index: 1;
     pointer-events: none;
+  }
+  /* Responsive adjustment for mobile */
+  @media (max-width: 900px) {
+    .header-image-crossfade {
+      aspect-ratio: 16/9;
+      min-height: 80px;
+      max-height: 180px;
+    }
+  }
+  @media (max-width: 600px) {
+    .header-image-crossfade {
+      aspect-ratio: 16/12;
+      min-height: 60px;
+      max-height: 120px;
+    }
+    .header-image-crossfade img {
+      border-radius: 1px;
+    }
   }
   @import url("https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400&family=Montserrat:wght@300;400;500;600;700&display=swap");
 
@@ -574,19 +699,20 @@
     font-size: 3.8rem;
     font-weight: 800;
     color: #377293;
+    line-height: 3.8rem;
   }
   .subtitle {
     font-family: monserrat, sans-serif;
-    font-size: 1.1rem;
+    font-size: 1.2rem;
     font-weight: 300;
     color: #377293;
   }
   .header {
     display: grid;
     grid-template-columns: minmax(300px, 1fr) 1.5fr;
-    align-items: center;
+    align-items: start;
     text-align: left;
-    margin-bottom: 1.5rem;
+    /* margin-bottom: 1.5rem; */
     gap: 2rem;
     max-width: 1800px;
     width: 100%;
@@ -597,25 +723,31 @@
     height: 2px;
     background: #adc2ce;
     border-radius: 2px;
-    margin: 0.5rem 0 1.5rem 0;
+    margin: 0rem 0 1.5rem 0;
     opacity: 0.5;
   }
-  .bottom-panel {
+
+  /* .bottom-panel {
     display: flex;
     justify-content: center;
     align-items: flex-start;
     width: 100%;
-    padding: 2rem 1rem;
-    box-sizing: border-box;
     margin-top: 2rem;
-  }
+  } */
 
   .chart-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    display: grid;
+    grid-template-columns: 35% 65%;
+    gap: 1rem;
+    width: 100%;
+    /* max-width: 1000px; */
+    /* margin: 0 auto; */
+    /* padding: 0 2rem 0 0; */
   }
-
+  .chart-title {
+    font-weight: 700;
+    text-align: center;
+  }
   iframe {
     border-radius: 10px;
     border: 1px solid #e9ecef;
@@ -664,7 +796,11 @@
   .italic {
     font-style: italic;
   }
-
+  h2,
+  p {
+    color: #377293;
+    text-align: left;
+  }
   .main-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -691,6 +827,8 @@
     flex-direction: column;
     align-items: center;
     gap: 1rem;
+    width: 120%;
+    max-width: 480px;
   }
 
   .image-container {
@@ -712,27 +850,32 @@
   }
 
   /* Responsive design */
-  @media (max-width: 768px) {
-    .main-grid {
-      grid-template-columns: 1fr;
-      gap: 1rem;
+  @media (max-width: 800px) {
+    .chart-container {
+      width: 100%;
+      padding: 0 0.5rem;
     }
-
     .header {
-      grid-template-columns: 1fr;
+      display: grid;
+      grid-template-columns: none;
+      grid-template-rows: auto auto;
       text-align: center;
       gap: 1.5rem;
     }
-
     .header img {
       max-width: 400px;
       margin: 0 auto;
     }
-
+    .main-grid {
+      display: grid;
+      grid-template-columns: none;
+      grid-template-rows: auto auto;
+      gap: 1.5rem;
+      width: 100%;
+    }
     .image-container {
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     }
-
     main {
       padding: 1rem 2rem;
     }
@@ -761,10 +904,25 @@
   }
 
   .image-container img {
-    width: 100%; /* Make images fit their container */
-    height: auto; /* Maintain aspect ratio */
-    max-width: 300px; /* Optional: Limit maximum width */
-    margin: 0; /* Remove extra margin */
+    width: 100%;
+    height: auto;
+    max-width: 300px;
+    margin: 0;
+    transition:
+      transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+      box-shadow 0.25s;
+    box-shadow: 2px 4px 12px rgba(0, 0, 0, 0.12);
+    border-radius: 6px;
+    cursor: pointer;
+    z-index: 1;
+  }
+
+  .image-container img:hover {
+    transform: scale(1.18);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.22),
+      0 2px 8px rgba(0, 0, 0, 0.12);
+    z-index: 2;
   }
 
   input {
@@ -808,6 +966,7 @@
     font-family: montserrat, sans-serif;
     display: flex;
     align-items: center;
+    font-weight: bold;
   }
 
   button:hover {
@@ -912,10 +1071,7 @@
   }
 
   .ngram-chart {
-    border-radius: 10px;
-    border: 2px solid #ccc;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    margin: 1rem 0;
+    width: 100%;
   }
 
   .map-container {
