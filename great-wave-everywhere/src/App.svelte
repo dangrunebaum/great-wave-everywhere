@@ -16,7 +16,6 @@
   // --- State Variables ---
   let currentHeaderIndex = $state(0); // For rotating header images
   let intervalId; // Interval for header image rotation
-  // Remove selectedWord and wordImages; use images for both search and word click
 
   // --- Header Images ---
   const headerImages = [
@@ -43,30 +42,42 @@
    * When a word is clicked, fetch its images and replace the main images array
    */
   async function handleWordClick(word) {
-    images = await fetchImagesForWord(word);
-    userQuery = "";
-    // Geolocate image servers for word click
-    const imageUrls = images.map((img) => img.link).filter(Boolean);
-    let geoData = [];
-    if (imageUrls.length > 0) {
-      try {
-        const geoResponse = await axios.post(
-          "https://great-wave-api-1muq.onrender.com/api/geolocate",
-          { urls: imageUrls }
-        );
-        geoData = geoResponse.data;
-      } catch (geoError) {
-        // Geolocation API error
+    if (!word) return;
+    loading = true;
+    try {
+      const response = await axios.get(
+        `https://great-wave-api-1muq.onrender.com/api/images/multilang?q=${encodeURIComponent(word)}`,
+      );
+      images = response.data.filter((item) => item.image && item.image.link);
+
+      // Geolocate image servers for multilingual results
+      const imageUrls = images.map((item) => item.image.link).filter(Boolean);
+      let geoData = [];
+      if (imageUrls.length > 0) {
+        try {
+          const geoResponse = await axios.post(
+            "https://great-wave-api-1muq.onrender.com/api/geolocate",
+            { urls: imageUrls },
+          );
+          geoData = geoResponse.data;
+        } catch (geoError) {
+          // Geolocation API error
+        }
       }
+      serverLocations = geoData.filter((loc) => {
+        if (loc == null) return false;
+        const lat = Number(loc.lat);
+        const lng = Number(loc.lng);
+        if (isNaN(lat) || isNaN(lng)) return false;
+        if (lat === 0 && lng === 0) return false;
+        return true;
+      });
+      userQuery = "";
+    } catch (error) {
+      console.error("Error fetching images for word", error);
+    } finally {
+      loading = false;
     }
-    serverLocations = geoData.filter((loc) => {
-      if (loc == null) return false;
-      const lat = Number(loc.lat);
-      const lng = Number(loc.lng);
-      if (isNaN(lat) || isNaN(lng)) return false;
-      if (lat === 0 && lng === 0) return false;
-      return true;
-    });
   }
 
   /**
@@ -112,18 +123,11 @@
   let worldMapData = $state(null); // GeoJSON for world map
   let hoveredLocationText = $state(""); // Tooltip for hovered location
 
-  // --- Firestore Backup (Disabled) ---
-  // Saving Firestore 'words' collection as JSON is no longer needed.
-  // async function downloadWordsCollection() { ... }
-
   // --- World Map Loader ---
-  /**
-   * Load world map data (TopoJSON → GeoJSON)
-   */
   async function loadWorldMap() {
     try {
       const response = await fetch(
-        "/great-wave-everywhere/ne_110m_admin_0_countries.json"
+        "/great-wave-everywhere/ne_110m_admin_0_countries.json",
       );
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -140,7 +144,7 @@
           const objectName = Object.keys(topoData.objects)[0];
           worldMapData = topojson.feature(
             topoData,
-            topoData.objects[objectName]
+            topoData.objects[objectName],
           );
         }
       } catch (altError) {
@@ -181,25 +185,25 @@
     loading = true;
     try {
       const response = await axios.get(
-        `https://great-wave-api-1muq.onrender.com/api/images?q=${userQuery}`
+        `https://great-wave-api-1muq.onrender.com/api/images/multilang?q=${encodeURIComponent(userQuery)}`,
       );
-      images = response.data;
-      const imageUrls = images.map((img) => img.link).filter(Boolean);
-      // Geolocate image servers
+      // response.data is an array of { language, languageCode, query, image: { link, title, thumbnail } }
+      images = response.data.filter((item) => item.image && item.image.link);
+
+      // Geolocate image servers for multilingual results
+      const imageUrls = images.map((item) => item.image.link).filter(Boolean);
       let geoData = [];
       if (imageUrls.length > 0) {
         try {
           const geoResponse = await axios.post(
             "https://great-wave-api-1muq.onrender.com/api/geolocate",
-            { urls: imageUrls }
+            { urls: imageUrls },
           );
           geoData = geoResponse.data;
-          console.log("Geolocation API data:", geoData);
         } catch (geoError) {
           // Geolocation API error
         }
       }
-      // Filter valid server locations
       serverLocations = geoData.filter((loc) => {
         if (loc == null) return false;
         const lat = Number(loc.lat);
@@ -208,6 +212,7 @@
         if (lat === 0 && lng === 0) return false;
         return true;
       });
+
       // Update word cloud
       try {
         await updateWord(userQuery); // Update Firestore
@@ -249,7 +254,7 @@
         d3
           .forceLink(links)
           .id((d) => d.id)
-          .distance(25)
+          .distance(25),
       )
       .force("charge", d3.forceManyBody().strength(-100))
       .force("center", d3.forceCenter(200, 300))
@@ -262,9 +267,9 @@
               return 150 * (1 - normalizedCount);
             },
             200,
-            300
+            300,
           )
-          .strength(0.5)
+          .strength(0.5),
       )
       .force("boundary", () => {
         nodes.forEach((node) => {
@@ -335,23 +340,28 @@
   <div class="header-piping"></div>
 
   <!-- MAIN BODY -->
-  <h1>
+  <h1 style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
     HOKUSAI'S <em class="italic">GREAT WAVE</em> CAN BE
-    <input
-      type="text"
-      bind:value={userQuery}
-      placeholder="ANYTHING"
-      onkeydown={(e) => {
-        if (e.key === "Enter") fetchImages();
-      }}
-    />
-    <div class="search-container">
-      <div class="button-wrapper">
-        <button onclick={fetchImages}>Remix</button>
-      </div>
-      <div class="call-to-action">No images yet — enter a search term!</div>
-    </div>
+    <span style="display: flex; align-items: center; gap: 0.5rem;">
+      <input
+        type="text"
+        bind:value={userQuery}
+        placeholder="ANYTHING"
+        onkeydown={(e) => {
+          if (e.key === "Enter") fetchImages();
+        }}
+        style="margin-left: 0.5rem;"
+      />
+      <button onclick={fetchImages}>Search</button>
+    </span>
   </h1>
+
+  <div class="search-container search-container-below-h1">
+    <div class="call-to-action">
+      No images yet — enter a search term above! <br /> (First search may take several
+      seconds while the server wakes.)
+    </div>
+  </div>
   <div class="main-grid">
     <div class="left-column">
       <!-- WORLD MAP COMPONENT -->
@@ -378,7 +388,7 @@
                 <!-- Debug: log countries with no path data -->
                 {console.log(
                   `No path data for country ${index}:`,
-                  country.geometry?.type
+                  country.geometry?.type,
                 )}
               {/if}
             {/each}
@@ -386,15 +396,14 @@
             <!-- Render server location pins -->
             {#if serverLocations.length > 0}
               {#each serverLocations as location}
-                {console.log(location)}
+                <!-- {console.log(location)} -->
                 {@const coords = projection([location.lng, location.lat])}
                 {#if coords}
                   <g
                     class="location-pin"
                     onmouseover={() => {
                       isHovered = location.domain;
-                      hoveredLocationText =
-                        location.city || location.country || "Unknown location";
+                      hoveredLocationText = location.domain || "Unknown domain";
                     }}
                     onmouseout={() => {
                       isHovered = null;
@@ -409,6 +418,7 @@
                       fill={isHovered === location.domain
                         ? "#ff4500"
                         : "#ff6b35"}
+                      style="pointer-events: none;"
                     />
                   </g>
                 {/if}
@@ -431,42 +441,42 @@
             >
           {/if}
         </div>
-        <div class="image-container">
-          {#each images as img}
+        <div
+          class="image-container grid-3x3"
+          style="width: 100%; max-width: 900px; margin: 0 auto;"
+        >
+          {#each images.slice(0, 8) as img, i (`${img.image.link || "no-link"}-${i}`)}
             <div class="image-with-title">
-              <a href={img.link} target="_blank" rel="noopener noreferrer">
+              <a
+                href={img.image.link}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <img
-                  src={img.link}
+                  src={img.image.link}
+                  alt={img.image.title}
                   onerror={(e) => {
                     e.target.src = "";
                   }}
                   onmouseover={() => {
-                    isHovered = getDomain(img.link);
+                    // Highlight the map pin for this image's domain
+                    const domain = getDomain(img.image.link);
+                    isHovered = domain;
                     const loc = serverLocations.find(
-                      (l) => l.domain === isHovered
+                      (l) => l.domain === domain,
                     );
                     hoveredLocationText = loc
-                      ? loc.city ||
-                        loc.country ||
-                        loc.domain ||
-                        "Unknown location"
-                      : isHovered || "Unknown location";
-                    console.log("Hovered Domain:", isHovered);
+                      ? loc.domain || "Unknown domain"
+                      : domain || "Unknown domain";
                   }}
                   onmouseout={() => {
                     isHovered = null;
                     hoveredLocationText = "";
                   }}
-                  style=""
                 />
               </a>
-              <div
-                class="image-title-box"
-                style="background: {isHovered === normalizeUrl(img.link)
-                  ? '#ffe5d0'
-                  : '#f9f9f9'};"
-              >
-                {@html `<textarea readonly rows='2'>${img.title}</textarea>`}
+              <div class="image-title-box">
+                {img.image.title}
               </div>
             </div>
           {/each}
@@ -525,11 +535,19 @@
 
             <!-- Render nodes as text -->
             {#each nodes as node}
+              {@const minCount = Math.min(...nodes.map((n) => n.count))}
+              {@const maxCount = Math.max(...nodes.map((n) => n.count))}
+              {@const t =
+                (node.count - minCount) / Math.max(1, maxCount - minCount)}
+              {@const color =
+                t < 0.7
+                  ? d3.interpolateLab("#ADC2CE", "#377293")(t / 0.7)
+                  : d3.interpolateLab("#377293", "#ff6b35")((t - 0.7) / 0.3)}
               <text
                 x={node.x}
                 y={node.y}
                 font-size={`${8 + node.count}px`}
-                fill="steelblue"
+                fill={color}
                 text-anchor="middle"
                 alignment-baseline="middle"
                 filter="url(#dropshadow)"
@@ -539,7 +557,7 @@
                   e.target.style.cursor = "pointer";
                 }}
                 onmouseout={(e) => {
-                  e.target.style.fill = "steelblue";
+                  e.target.style.fill = color;
                 }}
                 style="cursor: pointer;"
               >
@@ -552,7 +570,12 @@
         <div class="trending-panel">
           <ul>
             {#each trending as word}
-              <li>{word.id} <span class="count">({word.count})</span></li>
+              <li
+                onclick={() => handleWordClick(word.id)}
+                style="cursor:pointer;"
+              >
+                {word.id} <span class="count">({word.count})</span>
+              </li>
             {/each}
           </ul>
         </div>
@@ -600,11 +623,13 @@
           Mentions of "Great Wave off Kanagawa" over time
         </p>
         <img
-          src="public/ngram_chart_great_wave_off_kanagawa.png"
+          src="/great-wave-everywhere/ngram_chart_great_wave_off_kanagawa.png"
           alt="Google Ngram Viewer chart for 'Great Wave off Kanagawa'"
           class="ngram-chart"
         />
-        <p>Source: Google Books Ngram Viewer, English corpus, 1900–2022</p>
+        <p class="source">
+          Source: Google Books Ngram Viewer, English corpus, 1900–2022
+        </p>
       </div>
       <!-- <iframe
         name="ngram_chart"
@@ -623,6 +648,9 @@
 </main>
 
 <style>
+  .source {
+    font-size: 0.7rem;
+  }
   .header-image-crossfade {
     position: relative;
     width: 100%;
@@ -759,11 +787,20 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: flex-start;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .image-with-title img {
+    display: block;
+    width: 180px;
+    height: auto;
+    margin: 0 auto;
   }
 
-  .image-title-box textarea {
+  .image-title-box {
     font-family: montserrat, sans-serif;
-    font-size: 12px;
+    font-size: 10px;
     width: 180px;
     margin-top: 0.25rem;
     text-align: center;
@@ -806,8 +843,9 @@
     grid-template-columns: 1fr 1fr;
     gap: 2rem;
     width: 100%;
-    /* max-width: 1200px; */
+    max-width: 1800px;
     margin: 0 auto;
+    /* Responsive, centered, not too wide */
   }
 
   .left-column {
@@ -831,12 +869,14 @@
     max-width: 480px;
   }
 
-  .image-container {
+  .grid-3x3 {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 2fr));
-    gap: 1rem;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, auto);
+    gap: 1.2rem 1.2rem;
     justify-items: center;
-    align-items: start;
+    align-items: center;
+    margin-bottom: 1.5rem;
   }
 
   .no-images-placeholder {
@@ -926,7 +966,7 @@
   }
 
   input {
-    width: 10%;
+    width: 7rem;
     padding: 0.5rem;
     margin: 1rem;
     border-radius: 5px;
@@ -953,6 +993,13 @@
     align-items: center;
     gap: 1rem;
     vertical-align: middle;
+  }
+  .search-container-below-h1 {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    margin-top: -1rem;
   }
 
   .button-wrapper {
@@ -998,7 +1045,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 1rem 5rem;
+    padding: 1rem 1rem;
   }
 
   .header img {
@@ -1017,7 +1064,6 @@
   .image-container img {
     width: 100%;
     max-width: 300px;
-    margin: 1rem;
   }
 
   svg {
@@ -1061,8 +1107,8 @@
   .trending-panel li {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 0.25rem;
-    font-size: 1rem;
+    margin-bottom: 0.05rem;
+    font-size: 0.8rem;
   }
 
   .trending-panel .count {
@@ -1081,10 +1127,6 @@
     text-align: left;
   }
 
-  .world-map {
-    /* No background - show body background */
-  }
-
   .location-pin .pin {
     cursor: pointer;
     transition: r 0.2s ease;
@@ -1093,25 +1135,5 @@
   .location-pin:hover .pin {
     r: 6;
     fill: #ff4500;
-  }
-
-  .map-caption {
-    margin-top: 0.5rem;
-    font-size: 0.9rem;
-    color: #666;
-    font-style: italic;
-  }
-
-  .debug-info {
-    background-color: #fff3cd;
-    border: 1px solid #ffeaa7;
-    padding: 0.5rem;
-    margin: 0.5rem 0;
-    border-radius: 4px;
-    font-size: 0.8rem;
-  }
-
-  .debug-info p {
-    margin: 0.2rem 0;
   }
 </style>
