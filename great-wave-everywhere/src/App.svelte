@@ -19,12 +19,12 @@
 
   // --- Header Images ---
   const headerImages = [
-    "/great-wave-everywhere/main-image.jpeg",
-    "/great-wave-everywhere/Hokusai-Great_Wave_off_Kanagawa-cat-end.jpg",
-    "/great-wave-everywhere/tomoko_nagao_hokusai-the_great_wave_of_kanagawa_with_mc_cupnoodle_kewpie_kikkoman_and_kitty_2012_digital_art_50_x_70_cm-_70_x_100_cm.jpe_3.jpg",
-    "/great-wave-everywhere/135e9cb8ff232a9c7e1f1be108eb670f.jpg",
-    "/great-wave-everywhere/2372ef58832305.5a0b25df284b7.jpg.webp",
-    "/great-wave-everywhere/image_BT0qjFvT31.png.jpeg",
+    "/main-image.jpeg",
+    "/Hokusai-Great_Wave_off_Kanagawa-cat-end.jpg",
+    "/tomoko_nagao_hokusai-the_great_wave_of_kanagawa_with_mc_cupnoodle_kewpie_kikkoman_and_kitty_2012_digital_art_50_x_70_cm-_70_x_100_cm.jpe_3.jpg",
+    "/135e9cb8ff232a9c7e1f1be108eb670f.jpg",
+    "/2372ef58832305.5a0b25df284b7.jpg.webp",
+    "/image_BT0qjFvT31.png.jpeg",
   ];
 
   // --- Header Image Rotation ---
@@ -126,9 +126,7 @@
   // --- World Map Loader ---
   async function loadWorldMap() {
     try {
-      const response = await fetch(
-        "/great-wave-everywhere/ne_110m_admin_0_countries.json",
-      );
+      const response = await fetch("/ne_110m_admin_0_countries.json");
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -623,7 +621,7 @@
           Mentions of "Great Wave off Kanagawa" over time
         </p>
         <img
-          src="/great-wave-everywhere/ngram_chart_great_wave_off_kanagawa.png"
+          src="/ngram_chart_great_wave_off_kanagawa.png"
           alt="Google Ngram Viewer chart for 'Great Wave off Kanagawa'"
           class="ngram-chart"
         />
