@@ -362,76 +362,13 @@
   </div>
   <div class="main-grid">
     <div class="left-column">
-      <!-- WORLD MAP COMPONENT -->
-      <div class="map-container">
-        {#if images.length > 0 && worldMapData}
-          {@const projection = d3
-            .geoNaturalEarth1()
-            .scale(40)
-            .translate([100, 62.5])}
-          {@const pathGenerator = d3.geoPath().projection(projection)}
-
-          <svg width="200" height="125" viewBox="0 0 200 125" class="world-map">
-            <!-- Render world countries -->
-            {#each worldMapData.features as country, index}
-              {@const pathData = pathGenerator(country)}
-              {#if pathData}
-                <path
-                  d={pathData}
-                  fill="#ADC2CE"
-                  stroke="#377293"
-                  stroke-width="0.5"
-                />
-              {:else}
-                <!-- Debug: log countries with no path data -->
-                {console.log(
-                  `No path data for country ${index}:`,
-                  country.geometry?.type,
-                )}
-              {/if}
-            {/each}
-
-            <!-- Render server location pins -->
-            {#if serverLocations.length > 0}
-              {#each serverLocations as location}
-                <!-- {console.log(location)} -->
-                {@const coords = projection([location.lng, location.lat])}
-                {#if coords}
-                  <g
-                    class="location-pin"
-                    onmouseover={() => {
-                      isHovered = location.domain;
-                      hoveredLocationText = location.domain || "Unknown domain";
-                    }}
-                    onmouseout={() => {
-                      isHovered = null;
-                      hoveredLocationText = "";
-                    }}
-                  >
-                    <circle
-                      class="pin"
-                      cx={coords[0]}
-                      cy={coords[1]}
-                      r={isHovered === location.domain ? 7 : 4}
-                      fill={isHovered === location.domain
-                        ? "#ff4500"
-                        : "#ff6b35"}
-                      style="pointer-events: none;"
-                    />
-                  </g>
-                {/if}
-              {/each}
-            {/if}
-          </svg>
-        {/if}
-      </div>
       <!-- IMAGE GALLERY: Show images from search or word click -->
       {#if images.length > 0}
         <div
           style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;"
         >
           <span style="color: #377293; font-weight: bold; font-size: 0.95rem;"
-            >Hover for image server locations:</span
+            >Hover images for server locations:</span
           >
           {#if hoveredLocationText}
             <span style="color: #377293; font-weight: bold; font-size: 0.95rem;"
@@ -443,6 +380,68 @@
           class="image-container grid-3x3"
           style="width: 100%; max-width: 900px; margin: 0 auto;"
         >
+          <!-- Map as first grid item -->
+          <div
+            class="image-with-title"
+            style="display: flex; flex-direction: column; justify-content: flex-start; align-items: center; height: 100%;"
+          >
+            {#if images.length > 0 && worldMapData}
+              {@const projection = d3
+                .geoNaturalEarth1()
+                .scale(40)
+                .translate([100, 62.5])}
+              {@const pathGenerator = d3.geoPath().projection(projection)}
+              <svg
+                width="200"
+                height="125"
+                viewBox="0 0 200 125"
+                class="world-map"
+              >
+                {#each worldMapData.features as country, index}
+                  {@const pathData = pathGenerator(country)}
+                  {#if pathData}
+                    <path
+                      d={pathData}
+                      fill="#ADC2CE"
+                      stroke="#377293"
+                      stroke-width="0.5"
+                    />
+                  {/if}
+                {/each}
+                {#if serverLocations.length > 0}
+                  {#each serverLocations as location}
+                    {@const coords = projection([location.lng, location.lat])}
+                    {#if coords}
+                      <g
+                        class="location-pin"
+                        onmouseover={() => {
+                          isHovered = location.domain;
+                          hoveredLocationText =
+                            location.domain || "Unknown domain";
+                        }}
+                        onmouseout={() => {
+                          isHovered = null;
+                          hoveredLocationText = "";
+                        }}
+                      >
+                        <circle
+                          class="pin"
+                          cx={coords[0]}
+                          cy={coords[1]}
+                          r={isHovered === location.domain ? 7 : 4}
+                          fill={isHovered === location.domain
+                            ? "#ff4500"
+                            : "#ff6b35"}
+                          style="pointer-events: none;"
+                        />
+                      </g>
+                    {/if}
+                  {/each}
+                {/if}
+              </svg>
+            {/if}
+            <!-- Removed World Map title -->
+          </div>
           {#each images.slice(0, 8) as img, i (`${img.image.link || "no-link"}-${i}`)}
             <div class="image-with-title">
               <a
@@ -451,7 +450,7 @@
                 rel="noopener noreferrer"
               >
                 <img
-                  src={img.image.link}
+                  src={img.image.link.replace("http://", "https://")}
                   alt={img.image.title}
                   onerror={(e) => {
                     e.target.src = "";
@@ -629,18 +628,6 @@
           Source: Google Books Ngram Viewer, English corpus, 1900–2022
         </p>
       </div>
-      <!-- <iframe
-        name="ngram_chart"
-        src="https://books.google.com/ngrams/interactive_chart?content=Great+Wave+off+Kanagawa&year_start=1900&year_end=2022&corpus=en&smoothing=3"
-        width="900"
-        height="400"
-        marginwidth="50"
-        marginheight="0"
-        hspace="0"
-        vspace="0"
-        frameborder="0"
-        scrolling="no"
-      ></iframe> -->
     </div>
   </div>
 </main>
@@ -753,34 +740,16 @@
     opacity: 0.5;
   }
 
-  /* .bottom-panel {
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    width: 100%;
-    margin-top: 2rem;
-  } */
-
   .chart-container {
     display: grid;
     grid-template-columns: 35% 65%;
     gap: 1rem;
     width: 100%;
-    /* max-width: 1000px; */
-    /* margin: 0 auto; */
-    /* padding: 0 2rem 0 0; */
   }
   .chart-title {
     font-weight: 700;
     text-align: center;
   }
-  iframe {
-    border-radius: 10px;
-    border: 1px solid #e9ecef;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    margin: 1rem 0;
-  }
-
   .image-with-title {
     display: flex;
     flex-direction: column;
