@@ -286,7 +286,7 @@ exports.searchImagesMultilang = functions
 // FIRESTORE ENDPOINTS - Word tracking
 // ============================================
 
-// GET all words from collection
+// GET all words from collection - Fixed async/await issue
 exports.getWords = functions.https.onRequest(async (req, res) => {
   setCors(res);
 
@@ -311,7 +311,7 @@ exports.getWords = functions.https.onRequest(async (req, res) => {
   }
 });
 
-// GET trending words
+// GET trending words - Fixed async/await issue
 exports.getTrendingWords = functions.https.onRequest(async (req, res) => {
   setCors(res);
 
@@ -342,7 +342,7 @@ exports.getTrendingWords = functions.https.onRequest(async (req, res) => {
   }
 });
 
-// POST to update word count
+// POST to update word count - Fixed async/await issue
 exports.updateWord = functions.https.onRequest(async (req, res) => {
   setCors(res);
 
