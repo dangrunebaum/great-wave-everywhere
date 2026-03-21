@@ -264,11 +264,12 @@
       loading = false;
     }
 
-    // Load word cloud data
+    // Load word cloud data (trending only - getWords has IAM issue)
     (async () => {
       try {
-        nodes = await fetchWords();
         trending = await fetchTrendingWords(5);
+        // Use trending words as nodes if getWords fails
+        nodes = trending.map(w => ({ id: w.id, group: 1}));
         buildLinks();
         restartSimulation();
       } catch (firebaseError) {
