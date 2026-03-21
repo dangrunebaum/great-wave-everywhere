@@ -287,7 +287,12 @@ exports.searchImagesMultilang = functions
 // ============================================
 
 // GET all words from collection - Fixed async/await issue
-exports.getWords = functions.https.onRequest(async (req, res) => {
+exports.getWords = functions
+  .runWith({
+    memory: "512MB",
+    timeoutSeconds: 60,
+  })
+  .https.onRequest(async (req, res) => {
   setCors(res);
 
   if (req.method === "OPTIONS") {
@@ -312,7 +317,12 @@ exports.getWords = functions.https.onRequest(async (req, res) => {
 });
 
 // GET trending words - Fixed async/await issue
-exports.getTrendingWords = functions.https.onRequest(async (req, res) => {
+exports.getTrendingWords = functions
+  .runWith({
+    memory: "512MB",
+    timeoutSeconds: 60,
+  })
+  .https.onRequest(async (req, res) => {
   setCors(res);
 
   if (req.method === "OPTIONS") {
@@ -343,7 +353,12 @@ exports.getTrendingWords = functions.https.onRequest(async (req, res) => {
 });
 
 // POST to update word count - Fixed async/await issue
-exports.updateWord = functions.https.onRequest(async (req, res) => {
+exports.updateWord = functions
+  .runWith({
+    memory: "512MB",
+    timeoutSeconds: 60,
+  })
+  .https.onRequest(async (req, res) => {
   setCors(res);
 
   if (req.method === "OPTIONS") {
