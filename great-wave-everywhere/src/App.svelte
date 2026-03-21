@@ -4,14 +4,7 @@
   import axios from "axios";
   import * as d3 from "d3";
   import * as topojson from "topojson-client";
-  import {
-    fetchWords,
-    updateWord,
-    fetchTrendingWords,
-    fetchImagesForWord,
-  } from "./api";
-  // import { collection, getDocs } from "firebase/firestore";
-  // import { db } from "./firebase";
+  import { fetchWords, updateWord, fetchTrendingWords } from "./api";
 
   // --- State Variables ---
   let currentHeaderIndex = $state(0); // For rotating header images
@@ -46,7 +39,7 @@
     loading = true;
     try {
       const response = await axios.get(
-        `https://great-wave-api-1muq.onrender.com/api/images/multilang?q=${encodeURIComponent(word)}`,
+        `https://us-central1-great-wave-everywhere.cloudfunctions.net/searchImagesMultilang?q=${encodeURIComponent(word)}`,
       );
       images = response.data.filter((item) => item.image && item.image.link);
 
@@ -56,7 +49,7 @@
       if (imageUrls.length > 0) {
         try {
           const geoResponse = await axios.post(
-            "https://great-wave-api-1muq.onrender.com/api/geolocate",
+            "https://us-central1-great-wave-everywhere.cloudfunctions.net/geolocate",
             { urls: imageUrls },
           );
           geoData = geoResponse.data;
@@ -183,7 +176,7 @@
     loading = true;
     try {
       const response = await axios.get(
-        `https://great-wave-api-1muq.onrender.com/api/images/multilang?q=${encodeURIComponent(userQuery)}`,
+        `https://us-central1-great-wave-everywhere.cloudfunctions.net/searchImagesMultilang?q=${encodeURIComponent(userQuery)}`,
       );
       // response.data is an array of { language, languageCode, query, image: { link, title, thumbnail } }
       images = response.data.filter((item) => item.image && item.image.link);
@@ -194,7 +187,7 @@
       if (imageUrls.length > 0) {
         try {
           const geoResponse = await axios.post(
-            "https://great-wave-api-1muq.onrender.com/api/geolocate",
+            "https://us-central1-great-wave-everywhere.cloudfunctions.net/geolocate",
             { urls: imageUrls },
           );
           geoData = geoResponse.data;
@@ -211,16 +204,24 @@
         return true;
       });
 
-      // Update word cloud
-      try {
-        await updateWord(userQuery); // Update Firestore
-        nodes = await fetchWords(); // Re-fetch updated nodes
-        trending = await fetchTrendingWords(5);
-        buildLinks();
-        restartSimulation();
-      } catch (firebaseError) {
-        console.warn("Firebase update failed:", firebaseError);
-      }
+      // Update word cloud (non-blocking)
+      updateWord(userQuery).catch((err) => {
+        console.error("Failed to update word:", err);
+      });
+
+      // Refresh word cloud asynchronously (don't wait for it)
+      (async () => {
+        try {
+          nodes = await fetchWords();
+          trending = await fetchTrendingWords(5);
+          buildLinks();
+          restartSimulation();
+        } catch (err) {
+          console.warn("Failed to update word cloud:", err);
+          // Word cloud will just not update, but images still show
+        }
+      })();
+
       userQuery = "";
     } catch (error) {
       console.error("Error fetching images", error);
