@@ -41,10 +41,12 @@
       const response = await axios.get(
         `https://us-central1-great-wave-everywhere.cloudfunctions.net/searchImagesMultilang?q=${encodeURIComponent(word)}`,
       );
-      images = response.data.filter((item) => item.image && item.image.link);
+      const rawImages = response.data.filter(
+        (item) => item.image && item.image.link,
+      );
 
       // Geolocate image servers for multilingual results
-      const imageUrls = images.map((item) => item.image.link).filter(Boolean);
+      const imageUrls = rawImages.map((item) => item.image.link).filter(Boolean);
       let geoData = [];
       if (imageUrls.length > 0) {
         try {
@@ -65,6 +67,9 @@
         if (lat === 0 && lng === 0) return false;
         return true;
       });
+
+      // Apply smart image selection for diversity and geographic spread
+      images = selectBestImages(rawImages, serverLocations, 8);
       userQuery = "";
     } catch (error) {
       console.error("Error fetching images for word", error);
@@ -101,6 +106,108 @@
     } catch (e) {
       return url;
     }
+  }
+
+  /**
+   * Smart image selector: enforces domain diversity and geographic spread
+   * Removes duplicates, junk images, and prioritizes varied sources
+   */
+  function selectBestImages(rawImages, serverLocations, max = 8) {
+    const seenDomains = new Set();
+    const selected = [];
+
+    // Map domain → location (for quick lookup)
+    const domainToLocation = new Map();
+    serverLocations.forEach((loc) => {
+      if (loc?.domain) domainToLocation.set(loc.domain, loc);
+    });
+
+    // Step 1: clean + normalize - remove junk images
+    const validImages = rawImages.filter((item) => {
+      const link = item?.image?.link;
+      if (!link) return false;
+
+      // filter out junk
+      if (link.includes("favicon") || link.includes("logo")) return false;
+      if (link.endsWith(".svg")) return false;
+
+      return true;
+    });
+
+    // Step 2: prioritize domain diversity (one image per domain)
+    for (const item of validImages) {
+      if (selected.length >= max) break;
+
+      const link = item.image.link;
+      const domain = getDomain(link);
+
+      if (!domain) continue;
+
+      // enforce domain diversity
+      if (seenDomains.has(domain)) continue;
+
+      selected.push(item);
+      seenDomains.add(domain);
+    }
+
+    // Step 3: fallback fill (if not enough unique domains)
+    if (selected.length < max) {
+      for (const item of validImages) {
+        if (selected.length >= max) break;
+
+        if (!selected.includes(item)) {
+          selected.push(item);
+        }
+      }
+    }
+
+    // Step 4: geographic spread - sort by distance from center
+    if (selected.length > 0) {
+      // Calculate center of all locations
+      let centerLat = 0;
+      let centerLng = 0;
+      let locCount = 0;
+
+      selected.forEach((item) => {
+        const domain = getDomain(item.image.link);
+        const loc = domainToLocation.get(domain);
+        if (loc && loc.lat && loc.lng) {
+          centerLat += loc.lat;
+          centerLng += loc.lng;
+          locCount++;
+        }
+      });
+
+      if (locCount > 0) {
+        centerLat /= locCount;
+        centerLng /= locCount;
+
+        // Sort by distance from center (spreads images geographically)
+        selected.sort((a, b) => {
+          const domainA = getDomain(a.image.link);
+          const domainB = getDomain(b.image.link);
+          const locA = domainToLocation.get(domainA);
+          const locB = domainToLocation.get(domainB);
+
+          const distA = locA
+            ? Math.hypot(
+                (locA.lat || 0) - centerLat,
+                (locA.lng || 0) - centerLng,
+              )
+            : Infinity;
+          const distB = locB
+            ? Math.hypot(
+                (locB.lat || 0) - centerLat,
+                (locB.lng || 0) - centerLng,
+              )
+            : Infinity;
+
+          return distA - distB;
+        });
+      }
+    }
+
+    return selected.slice(0, max);
   }
 
   // --- UI State ---
@@ -179,10 +286,12 @@
         `https://us-central1-great-wave-everywhere.cloudfunctions.net/searchImagesMultilang?q=${encodeURIComponent(userQuery)}`,
       );
       // response.data is an array of { language, languageCode, query, image: { link, title, thumbnail } }
-      images = response.data.filter((item) => item.image && item.image.link);
+      const rawImages = response.data.filter(
+        (item) => item.image && item.image.link,
+      );
 
       // Geolocate image servers for multilingual results
-      const imageUrls = images.map((item) => item.image.link).filter(Boolean);
+      const imageUrls = rawImages.map((item) => item.image.link).filter(Boolean);
       let geoData = [];
       if (imageUrls.length > 0) {
         try {
@@ -203,6 +312,9 @@
         if (lat === 0 && lng === 0) return false;
         return true;
       });
+
+      // Apply smart image selection for diversity and geographic spread
+      images = selectBestImages(rawImages, serverLocations, 8);
 
       // Update word cloud (non-blocking)
       updateWord(userQuery).catch((err) => {
