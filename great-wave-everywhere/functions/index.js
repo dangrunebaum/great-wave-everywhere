@@ -287,7 +287,7 @@ exports.searchImagesMultilang = functions
 // ============================================
 
 // GET all words from collection
-exports.getWords = functions.https.onRequest((req, res) => {
+exports.getWords = functions.https.onRequest(async (req, res) => {
   setCors(res);
 
   if (req.method === "OPTIONS") {
@@ -298,23 +298,21 @@ exports.getWords = functions.https.onRequest((req, res) => {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  (async () => {
-    try {
-      const snapshot = await db.collection("words").get();
-      const words = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        count: doc.data().count,
-      }));
-      res.json(words);
-    } catch (error) {
-      console.error("Error fetching words:", error.message);
-      res.status(500).json({ error: "Failed to fetch words" });
-    }
-  })();
+  try {
+    const snapshot = await db.collection("words").get();
+    const words = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      count: doc.data().count,
+    }));
+    res.json(words);
+  } catch (error) {
+    console.error("Error fetching words:", error.message);
+    res.status(500).json({ error: "Failed to fetch words" });
+  }
 });
 
 // GET trending words
-exports.getTrendingWords = functions.https.onRequest((req, res) => {
+exports.getTrendingWords = functions.https.onRequest(async (req, res) => {
   setCors(res);
 
   if (req.method === "OPTIONS") {
@@ -325,29 +323,27 @@ exports.getTrendingWords = functions.https.onRequest((req, res) => {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  (async () => {
-    try {
-      const n = parseInt(req.query.n) || 5;
-      const snapshot = await db
-        .collection("words")
-        .orderBy("count", "desc")
-        .limit(n)
-        .get();
+  try {
+    const n = parseInt(req.query.n) || 5;
+    const snapshot = await db
+      .collection("words")
+      .orderBy("count", "desc")
+      .limit(n)
+      .get();
 
-      const trendingWords = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        count: doc.data().count,
-      }));
-      res.json(trendingWords);
-    } catch (error) {
-      console.error("Error fetching trending words:", error.message);
-      res.status(500).json({ error: "Failed to fetch trending words" });
-    }
-  })();
+    const trendingWords = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      count: doc.data().count,
+    }));
+    res.json(trendingWords);
+  } catch (error) {
+    console.error("Error fetching trending words:", error.message);
+    res.status(500).json({ error: "Failed to fetch trending words" });
+  }
 });
 
 // POST to update word count
-exports.updateWord = functions.https.onRequest((req, res) => {
+exports.updateWord = functions.https.onRequest(async (req, res) => {
   setCors(res);
 
   if (req.method === "OPTIONS") {
@@ -358,29 +354,27 @@ exports.updateWord = functions.https.onRequest((req, res) => {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  (async () => {
-    try {
-      const { word } = req.body;
-      if (!word) {
-        return res.status(400).json({ error: "Missing word parameter" });
-      }
-
-      const wordLower = word.toLowerCase();
-      const wordRef = db.collection("words").doc(wordLower);
-
-      await db.runTransaction(async (t) => {
-        const doc = await t.get(wordRef);
-        if (!doc.exists) {
-          t.set(wordRef, { count: 1 });
-        } else {
-          t.update(wordRef, { count: doc.data().count + 1 });
-        }
-      });
-
-      res.json({ success: true, word: wordLower });
-    } catch (error) {
-      console.error("Error updating word:", error.message);
-      res.status(500).json({ error: "Failed to update word" });
+  try {
+    const { word } = req.body;
+    if (!word) {
+      return res.status(400).json({ error: "Missing word parameter" });
     }
-  })();
+
+    const wordLower = word.toLowerCase();
+    const wordRef = db.collection("words").doc(wordLower);
+
+    await db.runTransaction(async (t) => {
+      const doc = await t.get(wordRef);
+      if (!doc.exists) {
+        t.set(wordRef, { count: 1 });
+      } else {
+        t.update(wordRef, { count: doc.data().count + 1 });
+      }
+    });
+
+    res.json({ success: true, word: wordLower });
+  } catch (error) {
+    console.error("Error updating word:", error.message);
+    res.status(500).json({ error: "Failed to update word" });
+  }
 });

@@ -1,10 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow Cloud Functions to read/write words collection
-    // Cloud Functions run as admin, so we allow all access to this collection
+    // Allow all operations on the words collection
+    // (Cloud Functions run as admin and can bypass these rules)
+    // This is for direct access if needed
     match /words/{document=**} {
-      allow read, write;
+      allow read, write: if true;
     }
     
     // Deny everything else by default
