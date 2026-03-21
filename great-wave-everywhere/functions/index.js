@@ -175,6 +175,8 @@ exports.searchImages = functions.https.onRequest((req, res) => {
 exports.searchImagesMultilang = functions
   .runWith({
     secrets: ["GOOGLE_API_KEY", "GOOGLE_CX"],
+    memory: "512MB",
+    timeoutSeconds: 60,
   })
   .https.onRequest((req, res) => {
     setCors(res);
@@ -204,7 +206,8 @@ exports.searchImagesMultilang = functions
           .json({ error: "Missing Google API credentials" });
       }
 
-      // Top 10 most commonly spoken languages with translations
+      // Top 5 most relevant languages for "Great Wave" artwork
+      // (Free Google CSE limited to 100 queries/day = 20 searches if using 5 languages)
       const languages = [
         {
           code: "en",
@@ -212,7 +215,7 @@ exports.searchImagesMultilang = functions
           translation: "Great Wave off Kanagawa",
         },
         { code: "zh", label: "Chinese", translation: "神奈川沖浪裏" },
-        { code: "hi", label: "Hindi", translation: "कानागावा की महान लहर" },
+        { code: "ja", label: "Japanese", translation: "神奈川沖浪裏" },
         {
           code: "es",
           label: "Spanish",
@@ -222,27 +225,6 @@ exports.searchImagesMultilang = functions
           code: "fr",
           label: "French",
           translation: "La Grande Vague de Kanagawa",
-        },
-        {
-          code: "ar",
-          label: "Arabic",
-          translation: "الموجة العظيمة قبالة كاناغاوا",
-        },
-        {
-          code: "pt",
-          label: "Portuguese",
-          translation: "A Grande Onda de Kanagawa",
-        },
-        {
-          code: "ru",
-          label: "Russian",
-          translation: "Большая волна в Канагаве",
-        },
-        { code: "ja", label: "Japanese", translation: "神奈川沖浪裏" },
-        {
-          code: "de",
-          label: "German",
-          translation: "Die große Welle vor Kanagawa",
         },
       ];
 

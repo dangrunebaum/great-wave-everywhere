@@ -253,25 +253,30 @@
 
   // --- Initial Data Load ---
   /**
-   * On mount, load words, trending topics, and world map
+   * On mount, load world map immediately
+   * Word cloud disabled due to Cloud Function access issues
    */
   onMount(async () => {
     loading = true;
     try {
+      await loadWorldMap();
+    } finally {
+      loading = false;
+    }
+
+    // Load word cloud data
+    (async () => {
       try {
         nodes = await fetchWords();
         trending = await fetchTrendingWords(5);
         buildLinks();
         restartSimulation();
       } catch (firebaseError) {
-        console.warn("Firebase connection failed:", firebaseError);
+        console.warn("Word cloud loading failed (optional):", firebaseError);
         nodes = [];
         trending = [];
       }
-      await loadWorldMap();
-    } finally {
-      loading = false;
-    }
+    })();
   });
 
   // --- Image Search ---
@@ -316,7 +321,7 @@
       // Apply smart image selection for diversity and geographic spread
       images = selectBestImages(rawImages, serverLocations, 8);
 
-      // Update word cloud (non-blocking)
+      // Update word count
       updateWord(userQuery).catch((err) => {
         console.error("Failed to update word:", err);
       });
@@ -330,7 +335,6 @@
           restartSimulation();
         } catch (err) {
           console.warn("Failed to update word cloud:", err);
-          // Word cloud will just not update, but images still show
         }
       })();
 
