@@ -175,8 +175,6 @@ exports.searchImages = functions.https.onRequest((req, res) => {
 exports.searchImagesMultilang = functions
   .runWith({
     secrets: ["GOOGLE_API_KEY", "GOOGLE_CX"],
-    memory: "512MB",
-    timeoutSeconds: 60,
   })
   .https.onRequest((req, res) => {
     setCors(res);
@@ -206,8 +204,7 @@ exports.searchImagesMultilang = functions
           .json({ error: "Missing Google API credentials" });
       }
 
-      // Top 5 most relevant languages for "Great Wave" artwork
-      // (Free Google CSE limited to 100 queries/day = 20 searches if using 5 languages)
+      // Top 10 most commonly spoken languages with translations
       const languages = [
         {
           code: "en",
@@ -215,7 +212,7 @@ exports.searchImagesMultilang = functions
           translation: "Great Wave off Kanagawa",
         },
         { code: "zh", label: "Chinese", translation: "神奈川沖浪裏" },
-        { code: "ja", label: "Japanese", translation: "神奈川沖浪裏" },
+        { code: "hi", label: "Hindi", translation: "कानागावा की महान लहर" },
         {
           code: "es",
           label: "Spanish",
@@ -225,6 +222,27 @@ exports.searchImagesMultilang = functions
           code: "fr",
           label: "French",
           translation: "La Grande Vague de Kanagawa",
+        },
+        {
+          code: "ar",
+          label: "Arabic",
+          translation: "الموجة العظيمة قبالة كاناغاوا",
+        },
+        {
+          code: "pt",
+          label: "Portuguese",
+          translation: "A Grande Onda de Kanagawa",
+        },
+        {
+          code: "ru",
+          label: "Russian",
+          translation: "Большая волна в Канагаве",
+        },
+        { code: "ja", label: "Japanese", translation: "神奈川沖浪裏" },
+        {
+          code: "de",
+          label: "German",
+          translation: "Die große Welle vor Kanagawa",
         },
       ];
 
@@ -286,13 +304,10 @@ exports.searchImagesMultilang = functions
 // FIRESTORE ENDPOINTS - Word tracking
 // ============================================
 
-// GET all words from collection - Fixed async/await issue
+// GET all words from collection
 exports.getWords = functions
-  .runWith({
-    memory: "512MB",
-    timeoutSeconds: 60,
-  })
-  .https.onRequest(async (req, res) => {
+  .runWith({ memory: "512MB", timeoutSeconds: 60 })
+  .https.onRequest((req, res) => {
   setCors(res);
 
   if (req.method === "OPTIONS") {
@@ -303,26 +318,25 @@ exports.getWords = functions
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  try {
-    const snapshot = await db.collection("words").get();
-    const words = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      count: doc.data().count,
-    }));
-    res.json(words);
-  } catch (error) {
-    console.error("Error fetching words:", error.message);
-    res.status(500).json({ error: "Failed to fetch words" });
-  }
+  (async () => {
+    try {
+      const snapshot = await db.collection("words").get();
+      const words = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        count: doc.data().count,
+      }));
+      res.json(words);
+    } catch (error) {
+      console.error("Error fetching words:", error.message);
+      res.status(500).json({ error: "Failed to fetch words" });
+    }
+  })();
 });
 
-// GET trending words - Fixed async/await issue
+// GET trending words
 exports.getTrendingWords = functions
-  .runWith({
-    memory: "512MB",
-    timeoutSeconds: 60,
-  })
-  .https.onRequest(async (req, res) => {
+  .runWith({ memory: "512MB", timeoutSeconds: 60 })
+  .https.onRequest((req, res) => {
   setCors(res);
 
   if (req.method === "OPTIONS") {
@@ -333,32 +347,31 @@ exports.getTrendingWords = functions
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  try {
-    const n = parseInt(req.query.n) || 5;
-    const snapshot = await db
-      .collection("words")
-      .orderBy("count", "desc")
-      .limit(n)
-      .get();
+  (async () => {
+    try {
+      const n = parseInt(req.query.n) || 5;
+      const snapshot = await db
+        .collection("words")
+        .orderBy("count", "desc")
+        .limit(n)
+        .get();
 
-    const trendingWords = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      count: doc.data().count,
-    }));
-    res.json(trendingWords);
-  } catch (error) {
-    console.error("Error fetching trending words:", error.message);
-    res.status(500).json({ error: "Failed to fetch trending words" });
-  }
+      const trendingWords = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        count: doc.data().count,
+      }));
+      res.json(trendingWords);
+    } catch (error) {
+      console.error("Error fetching trending words:", error.message);
+      res.status(500).json({ error: "Failed to fetch trending words" });
+    }
+  })();
 });
 
-// POST to update word count - Fixed async/await issue
+// POST to update word count
 exports.updateWord = functions
-  .runWith({
-    memory: "512MB",
-    timeoutSeconds: 60,
-  })
-  .https.onRequest(async (req, res) => {
+  .runWith({ memory: "512MB", timeoutSeconds: 60 })
+  .https.onRequest((req, res) => {
   setCors(res);
 
   if (req.method === "OPTIONS") {
@@ -369,27 +382,29 @@ exports.updateWord = functions
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  try {
-    const { word } = req.body;
-    if (!word) {
-      return res.status(400).json({ error: "Missing word parameter" });
-    }
-
-    const wordLower = word.toLowerCase();
-    const wordRef = db.collection("words").doc(wordLower);
-
-    await db.runTransaction(async (t) => {
-      const doc = await t.get(wordRef);
-      if (!doc.exists) {
-        t.set(wordRef, { count: 1 });
-      } else {
-        t.update(wordRef, { count: doc.data().count + 1 });
+  (async () => {
+    try {
+      const { word } = req.body;
+      if (!word) {
+        return res.status(400).json({ error: "Missing word parameter" });
       }
-    });
 
-    res.json({ success: true, word: wordLower });
-  } catch (error) {
-    console.error("Error updating word:", error.message);
-    res.status(500).json({ error: "Failed to update word" });
-  }
+      const wordLower = word.toLowerCase();
+      const wordRef = db.collection("words").doc(wordLower);
+
+      await db.runTransaction(async (t) => {
+        const doc = await t.get(wordRef);
+        if (!doc.exists) {
+          t.set(wordRef, { count: 1 });
+        } else {
+          t.update(wordRef, { count: doc.data().count + 1 });
+        }
+      });
+
+      res.json({ success: true, word: wordLower });
+    } catch (error) {
+      console.error("Error updating word:", error.message);
+      res.status(500).json({ error: "Failed to update word" });
+    }
+  })();
 });
