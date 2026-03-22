@@ -205,9 +205,10 @@
       });
 
       // Update word cloud (non-blocking)
-      updateWord(userQuery).catch((err) => {
-        console.error("Failed to update word:", err);
-      });
+      // DISABLED: updateWord has 403 IAM issue preventing CORS preflight
+      // updateWord(userQuery).catch((err) => {
+      //   console.error("Failed to update word:", err);
+      // });
 
       // Refresh word cloud asynchronously (don't wait for it)
       (async () => {
