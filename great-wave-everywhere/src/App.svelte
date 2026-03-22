@@ -152,8 +152,8 @@
     loading = true;
     try {
       try {
-        nodes = await fetchWords();
-        trending = await fetchTrendingWords(5);
+        nodes = await fetchTrendingWords(200);
+        trending = await fetchTrendingWords(200);
         buildLinks();
         restartSimulation();
       } catch (firebaseError) {
@@ -212,8 +212,8 @@
       // Refresh word cloud asynchronously (don't wait for it)
       (async () => {
         try {
-          nodes = await fetchWords();
-          trending = await fetchTrendingWords(5);
+          nodes = await fetchTrendingWords(200);
+          trending = await fetchTrendingWords(200);
           buildLinks();
           restartSimulation();
         } catch (err) {
