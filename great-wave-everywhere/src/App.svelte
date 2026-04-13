@@ -4,7 +4,13 @@
   import axios from "axios";
   import * as d3 from "d3";
   import * as topojson from "topojson-client";
-  import { fetchWords, updateWord, fetchTrendingWords } from "./api";
+  import {
+    fetchWords,
+    updateWord,
+    fetchTrendingWords,
+    updateLocation,
+    fetchTrendingLocations,
+  } from "./api";
 
   // --- State Variables ---
   let currentHeaderIndex = $state(0); // For rotating header images
@@ -19,6 +25,21 @@
     "/2372ef58832305.5a0b25df284b7.jpg.webp",
     "/image_BT0qjFvT31.png.jpeg",
   ];
+
+  // Define the Hokusai-derived color scale
+  const hokusaiScale = d3
+    .scaleLinear()
+    .domain([0, 0.2, 0.4, 0.6, 0.8, 0.9, 1.0])
+    .range([
+      "#E8D5B0", // parchment - rarest
+      "#C4A882", // tan
+      "#8B7355", // warm brown
+      "#A8C4C8", // pale wave blue
+      "#6B9BAA", // mid wave blue
+      "#2E5F8A", // strong wave blue
+      "#1B3A5C", // deep navy - most frequent
+    ])
+    .interpolate(d3.interpolateLab);
 
   // --- Header Image Rotation ---
   onMount(() => {
@@ -39,7 +60,7 @@
     loading = true;
     try {
       const response = await axios.get(
-        `https://us-central1-great-wave-everywhere.cloudfunctions.net/searchImagesMultilang?q=${encodeURIComponent(word)}`,
+        `https://great-wave-api-1muq.onrender.com/api/images/multilang?q=${encodeURIComponent(userQuery)}`,
       );
       images = response.data.filter((item) => item.image && item.image.link);
 
@@ -49,7 +70,7 @@
       if (imageUrls.length > 0) {
         try {
           const geoResponse = await axios.post(
-            "https://us-central1-great-wave-everywhere.cloudfunctions.net/geolocate",
+            `https://great-wave-api-1muq.onrender.com/api/geolocate`,
             { urls: imageUrls },
           );
           geoData = geoResponse.data;
@@ -113,8 +134,13 @@
   let trending = $state([]); // Trending words
   let loading = $state(false); // Loading indicator
   let serverLocations = $state([]); // Geolocated image servers
+  let persistentLocations = $state([]); // Accumulated locations for persistent map
   let worldMapData = $state(null); // GeoJSON for world map
   let hoveredLocationText = $state(""); // Tooltip for hovered location
+
+  const legendData = [5, 10, 20];
+  const legendX = 820;
+  const legendY = 30;
 
   // --- World Map Loader ---
   async function loadWorldMap() {
@@ -162,6 +188,7 @@
         trending = [];
       }
       await loadWorldMap();
+      persistentLocations = await fetchTrendingLocations(100);
     } finally {
       loading = false;
     }
@@ -176,7 +203,7 @@
     loading = true;
     try {
       const response = await axios.get(
-        `https://us-central1-great-wave-everywhere.cloudfunctions.net/searchImagesMultilang?q=${encodeURIComponent(userQuery)}`,
+        `https://great-wave-api-1muq.onrender.com/api/images/multilang?q=${encodeURIComponent(userQuery)}`,
       );
       // response.data is an array of { language, languageCode, query, image: { link, title, thumbnail } }
       images = response.data.filter((item) => item.image && item.image.link);
@@ -187,7 +214,7 @@
       if (imageUrls.length > 0) {
         try {
           const geoResponse = await axios.post(
-            "https://us-central1-great-wave-everywhere.cloudfunctions.net/geolocate",
+            `https://great-wave-api-1muq.onrender.com/api/geolocate`,
             { urls: imageUrls },
           );
           geoData = geoResponse.data;
@@ -205,14 +232,22 @@
       });
 
       // Update word cloud (non-blocking)
-      // DISABLED: updateWord has 403 IAM issue preventing CORS preflight
-      // updateWord(userQuery).catch((err) => {
-      //   console.error("Failed to update word:", err);
-      // });
+      updateWord(userQuery).catch((err) => {
+        console.error("Failed to update word:", err);
+      });
+
+      // Update persistent locations for each geolocated server (non-blocking)
+      serverLocations.forEach((loc) => {
+        updateLocation(loc.lat, loc.lng, loc.domain).catch((err) => {
+          console.error("Failed to update location:", err);
+        });
+      });
 
       // Refresh word cloud asynchronously (don't wait for it)
       (async () => {
         try {
+          // Add delay to allow Firestore to replicate the write
+          await new Promise((resolve) => setTimeout(resolve, 800));
           nodes = await fetchTrendingWords(200);
           trending = await fetchTrendingWords(200);
           buildLinks();
@@ -326,14 +361,14 @@
     <div>
       <!-- HEADER -->
       <div class="title">
-        GREAT WAVE <span style="color: #F0BF91;"> REMIX</span>
+        <em>GREAT WAVE</em> <span style="color: #F0BF91;"> EVERYWHERE</span>
       </div>
 
       <p class="subtitle">
-        Discover Hokusai's "Great Wave off Kanagawa" in unexpected contexts
-        worldwide. Search Google Images for any term you associate with this
-        iconic Japanese artwork to see how it has been reimagined in formats
-        spanning diverse topics and cultures.
+        Hokusai's "Great Wave off Kanagawa" may be the most reproduced image in
+        history. Search any word in any language to discover how it's been reimagined across
+        cultures, formats, and contexts worldwide, and help build a living
+        record of the <em>Great Wave</em>'s continuing reverberations.
       </p>
     </div>
   </div>
@@ -356,12 +391,6 @@
     </span>
   </h1>
 
-  <div class="search-container search-container-below-h1">
-    <div class="call-to-action">
-      No images yet — enter a search term above! <br /> (First search may take several
-      seconds while the server wakes.)
-    </div>
-  </div>
   <div class="main-grid">
     <div class="left-column">
       <!-- IMAGE GALLERY: Show images from search or word click -->
@@ -430,7 +459,7 @@
                           class="pin"
                           cx={coords[0]}
                           cy={coords[1]}
-                          r={isHovered === location.domain ? 7 : 4}
+                          r={isHovered === location.domain ? 5 : 2}
                           fill={isHovered === location.domain
                             ? "#ff4500"
                             : "#ff6b35"}
@@ -484,7 +513,7 @@
       {#if images.length === 0}
         <div class="no-images-placeholder">
           <p>
-            Enter a search term above to query Google Images for "Great Wave off
+            Enter a search term in any language above to query Google Images for "Great Wave off
             Kanagawa + [your search term]." Your search results will appear
             here.
           </p>
@@ -495,7 +524,7 @@
     <!-- WORD CLOUD AND TRENDING TOPICS -->
     <div class="right-column">
       <div class="word-cloud-container">
-        <div class="call-to-action">Or click on a trending topic!</div>
+        <div class="call-to-action">Trending searches</div>
         <svg width="120%" height="400" viewBox="0 0 480 400">
           <!-- Define drop shadow filter -->
           <defs>
@@ -536,29 +565,31 @@
             {#each nodes as node}
               {@const minCount = Math.min(...nodes.map((n) => n.count))}
               {@const maxCount = Math.max(...nodes.map((n) => n.count))}
+              {@const minLogCount = Math.log(minCount + 1)}
+              {@const maxLogCount = Math.log(maxCount + 1)}
+              {@const logNormalized =
+                (Math.log(node.count + 1) - minLogCount) /
+                Math.max(1, maxLogCount - minLogCount)}
+              {@const fontSize = 8 + logNormalized * 20}
               {@const t =
-                (node.count - minCount) / Math.max(1, maxCount - minCount)}
-              {@const color =
-                t < 0.7
-                  ? d3.interpolateLab("#ADC2CE", "#377293")(t / 0.7)
-                  : d3.interpolateLab("#377293", "#ff6b35")((t - 0.7) / 0.3)}
+                Math.log(node.count - minCount + 1) /
+                Math.log(Math.max(2, maxCount - minCount + 1))}
+              {@const color = hokusaiScale(t)}
               <text
                 x={node.x}
                 y={node.y}
-                font-size={`${8 + node.count}px`}
+                font-size={`${fontSize}px`}
                 fill={color}
                 text-anchor="middle"
                 alignment-baseline="middle"
                 filter="url(#dropshadow)"
-                onclick={() => handleWordClick(node.id)}
                 onmouseover={(e) => {
-                  e.target.style.fill = "#ff6b35";
-                  e.target.style.cursor = "pointer";
+                  e.target.style.fill = "#1B3A5C";
+                  e.target.style.cursor = "default";
                 }}
                 onmouseout={(e) => {
                   e.target.style.fill = color;
                 }}
-                style="cursor: pointer;"
               >
                 {node.id}
               </text>
@@ -569,10 +600,7 @@
         <div class="trending-panel">
           <ul>
             {#each trending as word}
-              <li
-                onclick={() => handleWordClick(word.id)}
-                style="cursor:pointer;"
-              >
+              <li>
                 {word.id} <span class="count">({word.count})</span>
               </li>
             {/each}
@@ -582,20 +610,142 @@
     </div>
   </div>
 
-  <!-- GOOGLE NGRAM VIEWER SECTION -->
-  <div style="text-align: left; color: #377293; padding-top: 5rem;">
-    <!-- <h2>
+  <div class="bottom-panel">
+    <!-- PERSISTENT GEOGRAPHIC MAP -->
+    <div
+      style="text-align: left; color: #377293; padding: 3rem 0 1rem 0; width: 100%; max-width: 1800px; margin: 0 auto;"
+    >
+      <h2>Where the <em>Great Wave</em> is searched</h2>
+      <p style="font-size: 0.95rem; margin-top: -0.5rem;">
+        Locations of image servers across searches, with circle size
+        representing frequency.
+      </p>
+    </div>
+
+    {#if persistentLocations.length > 0 && worldMapData}
+      {@const projection = d3
+        .geoNaturalEarth1()
+        .scale(200)
+        .translate([400, 320])}
+      {@const pathGenerator = d3.geoPath().projection(projection)}
+      {@const minCount = Math.min(...persistentLocations.map((l) => l.count))}
+      {@const maxCount = Math.max(...persistentLocations.map((l) => l.count))}
+      {@const minLogCount = Math.log(minCount + 1)}
+      {@const maxLogCount = Math.log(maxCount + 1)}
+      <div
+        style="display: flex; justify-content: center; width: 100%; padding: 0 0 3rem 0;"
+      >
+        <svg
+          width="100%"
+          height="500"
+          viewBox="-50 0 900 500"
+          style="max-width: 100%; border-radius: 8px;"
+        >
+          <!-- Render countries -->
+          {#each worldMapData.features as country}
+            {@const pathData = pathGenerator(country)}
+            {#if pathData}
+              <path
+                d={pathData}
+                fill="#ADC2CE"
+                stroke="#377293"
+                stroke-width="0.5"
+              />
+            {/if}
+          {/each}
+
+          <!-- Render location circles -->
+          {#each persistentLocations as location}
+            {@const coords = projection([location.lng, location.lat])}
+            {#if coords}
+              {@const logNormalized =
+                (Math.log(location.count + 1) - minLogCount) /
+                Math.max(1, maxLogCount - minLogCount)}
+              {@const radius = 3 + logNormalized * 12}
+              <g style="cursor: pointer;">
+                <circle
+                  cx={coords[0]}
+                  cy={coords[1]}
+                  r={radius}
+                  stroke="#ff6b35"
+                  fill="#ff6b35"
+                  fill-opacity="0.3"
+                  onmouseover={(e) => {
+                    e.target.style.fill = "#ff4500";
+                    e.target.style.opacity = "1";
+                    e.target.style.r = radius * 1.5;
+                  }}
+                  onmouseout={(e) => {
+                    e.target.style.fill = "#ff6b35";
+                    e.target.style.opacity = "0.7";
+                    e.target.style.r = radius;
+                  }}
+                />
+                <title>{location.domains.join(", ")} ({location.count})</title>
+              </g>
+            {:else}
+              <!-- Debug: location couldn't project -->
+            {/if}
+          {/each}
+
+          <!-- Legend -->
+          <g style="pointer-events: none;">
+            <!-- Legend title -->
+            <text
+              x={legendX - 50}
+              y={legendY - 20}
+              font-size="11px"
+              font-weight="bold"
+              fill="#377293"
+              text-anchor="middle"
+            >
+              Searches
+            </text>
+            <!-- Legend circles and labels -->
+            {#each legendData as count, i}
+              {@const logNormalized =
+                (Math.log(count + 1) - minLogCount) /
+                Math.max(1, maxLogCount - minLogCount)}
+              {@const radius = 3 + logNormalized * 12}
+              {@const xPos = legendX - (legendData.length - 1 - i) * 50}
+              <circle
+                cx={xPos}
+                cy={legendY}
+                r={radius}
+                fill="#ff6b35"
+                stroke="#ff6b35"
+                fill-opacity="0.3"
+              />
+              <text
+                x={xPos}
+                y={legendY + 22}
+                font-size="12px"
+                fill="#377293"
+                text-anchor="middle"
+                dominant-baseline="middle"
+              >
+                {count}
+              </text>
+            {/each}
+          </g>
+        </svg>
+      </div>
+    {/if}
+
+    <!-- GOOGLE NGRAM VIEWER SECTION -->
+    <div style="text-align: left; color: #377293; padding-top: 5rem;">
+      <!-- <h2>
       Google Ngram Viewer shows a steady rise in mentions of "Great Wave off
       Kanagawa"
     </h2> -->
-    <h2>Why remix the "Great Wave?"</h2>
-    This project explores the impact of Hokusai's iconic artwork, allowing users
-    to see for themselves how it continues to reverberate worldwide. Two centuries
-    since its creation around 1831, scholars say Hokusai’s print is possibly the
-    most reproduced image in the history of art, with global recognition far beyond
-    its original Japanese audience.
-  </div>
-  <div class="bottom-panel">
+      <h2>Why remix the <em>Great Wave</em>?</h2>
+      This project explores the impact of Hokusai's iconic artwork, allowing users
+      to see for themselves how it continues to reverberate worldwide. Two centuries
+      since its creation around 1831, scholars say Hokusai’s print is possibly the
+      most reproduced image in the history of art, with global recognition far beyond
+      its original Japanese audience.
+    </div>
+
     <div class="chart-container">
       <div>
         <p>
@@ -612,9 +762,9 @@
           elevating Hokusai’s work in Western art circles.
         </p>
         <p>
-          "Great Wave" now appears everywhere — from high fashion and novelty
-          goods to digital art, emojis, and even LEGO sets. It was chosen for
-          the 2024 Japanese 1,000-yen note — a highly public national symbol.
+          <em>Great Wave</em> now appears everywhere — from high fashion and novelty
+          goods to digital art, emojis, and even LEGO sets. It was chosen for the
+          2024 Japanese 1,000-yen note — a highly public national symbol.
         </p>
       </div>
       <div>
@@ -635,6 +785,12 @@
 </main>
 
 <style>
+  circle {
+    transition: all 0.3s ease;
+  }
+  path {
+    fill-opacity: 0.5;
+  }
   .source {
     font-size: 0.7rem;
   }
@@ -711,7 +867,7 @@
   }
   .title {
     font-family: monserrat, sans-serif;
-    font-size: 3.8rem;
+    font-size: 3.1rem;
     font-weight: 800;
     color: #377293;
     line-height: 3.8rem;
@@ -816,7 +972,9 @@
     margin: 0 auto;
     /* Responsive, centered, not too wide */
   }
-
+  .bottom-panel {
+    max-width: 1800px;
+  }
   .left-column {
     display: flex;
     flex-direction: column;
@@ -861,6 +1019,7 @@
   /* Responsive design */
   @media (max-width: 800px) {
     .chart-container {
+      display: block;
       width: 100%;
       padding: 0 0.5rem;
     }
@@ -886,7 +1045,7 @@
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     }
     main {
-      padding: 1rem 2rem;
+      padding: 1rem 4rem;
     }
   }
 
@@ -1046,11 +1205,12 @@
   }
 
   text {
-    cursor: pointer;
     font-family: Arial, sans-serif;
-    fill: #377293;
+    /* fill: #377293; */
   }
   .trending-panel {
+    height: 5rem;
+    overflow: scroll;
     background-color: #f7f1e4;
     color: #377293;
     border: 1px solid #e9ecef;

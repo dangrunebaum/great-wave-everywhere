@@ -175,6 +175,8 @@ exports.searchImages = functions.https.onRequest((req, res) => {
 exports.searchImagesMultilang = functions
   .runWith({
     secrets: ["GOOGLE_API_KEY", "GOOGLE_CX"],
+    memory: "512MB",
+    timeoutSeconds: 60,
   })
   .https.onRequest((req, res) => {
     setCors(res);
@@ -308,103 +310,103 @@ exports.searchImagesMultilang = functions
 exports.getWords = functions
   .runWith({ memory: "512MB", timeoutSeconds: 60 })
   .https.onRequest((req, res) => {
-  setCors(res);
+    setCors(res);
 
-  if (req.method === "OPTIONS") {
-    return res.status(204).send("");
-  }
-
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
-  (async () => {
-    try {
-      const snapshot = await db.collection("words").get();
-      const words = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        count: doc.data().count,
-      }));
-      res.json(words);
-    } catch (error) {
-      console.error("Error fetching words:", error.message);
-      res.status(500).json({ error: "Failed to fetch words" });
+    if (req.method === "OPTIONS") {
+      return res.status(204).send("");
     }
-  })();
-});
+
+    if (req.method !== "GET") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+
+    (async () => {
+      try {
+        const snapshot = await db.collection("words").get();
+        const words = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          count: doc.data().count,
+        }));
+        res.json(words);
+      } catch (error) {
+        console.error("Error fetching words:", error.message);
+        res.status(500).json({ error: "Failed to fetch words" });
+      }
+    })();
+  });
 
 // GET trending words
 exports.getTrendingWords = functions
   .runWith({ memory: "512MB", timeoutSeconds: 60 })
   .https.onRequest((req, res) => {
-  setCors(res);
+    setCors(res);
 
-  if (req.method === "OPTIONS") {
-    return res.status(204).send("");
-  }
-
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
-  (async () => {
-    try {
-      const n = parseInt(req.query.n) || 5;
-      const snapshot = await db
-        .collection("words")
-        .orderBy("count", "desc")
-        .limit(n)
-        .get();
-
-      const trendingWords = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        count: doc.data().count,
-      }));
-      res.json(trendingWords);
-    } catch (error) {
-      console.error("Error fetching trending words:", error.message);
-      res.status(500).json({ error: "Failed to fetch trending words" });
+    if (req.method === "OPTIONS") {
+      return res.status(204).send("");
     }
-  })();
-});
+
+    if (req.method !== "GET") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+
+    (async () => {
+      try {
+        const n = parseInt(req.query.n) || 5;
+        const snapshot = await db
+          .collection("words")
+          .orderBy("count", "desc")
+          .limit(n)
+          .get();
+
+        const trendingWords = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          count: doc.data().count,
+        }));
+        res.json(trendingWords);
+      } catch (error) {
+        console.error("Error fetching trending words:", error.message);
+        res.status(500).json({ error: "Failed to fetch trending words" });
+      }
+    })();
+  });
 
 // POST to update word count
 exports.updateWord = functions
   .runWith({ memory: "512MB", timeoutSeconds: 60 })
   .https.onRequest((req, res) => {
-  setCors(res);
+    setCors(res);
 
-  if (req.method === "OPTIONS") {
-    return res.status(204).send("");
-  }
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
-  (async () => {
-    try {
-      const { word } = req.body;
-      if (!word) {
-        return res.status(400).json({ error: "Missing word parameter" });
-      }
-
-      const wordLower = word.toLowerCase();
-      const wordRef = db.collection("words").doc(wordLower);
-
-      await db.runTransaction(async (t) => {
-        const doc = await t.get(wordRef);
-        if (!doc.exists) {
-          t.set(wordRef, { count: 1 });
-        } else {
-          t.update(wordRef, { count: doc.data().count + 1 });
-        }
-      });
-
-      res.json({ success: true, word: wordLower });
-    } catch (error) {
-      console.error("Error updating word:", error.message);
-      res.status(500).json({ error: "Failed to update word" });
+    if (req.method === "OPTIONS") {
+      return res.status(204).send("");
     }
-  })();
-});
+
+    if (req.method !== "POST") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+
+    (async () => {
+      try {
+        const { word } = req.body;
+        if (!word) {
+          return res.status(400).json({ error: "Missing word parameter" });
+        }
+
+        const wordLower = word.toLowerCase();
+        const wordRef = db.collection("words").doc(wordLower);
+
+        await db.runTransaction(async (t) => {
+          const doc = await t.get(wordRef);
+          if (!doc.exists) {
+            t.set(wordRef, { count: 1 });
+          } else {
+            t.update(wordRef, { count: doc.data().count + 1 });
+          }
+        });
+
+        res.json({ success: true, word: wordLower });
+      } catch (error) {
+        console.error("Error updating word:", error.message);
+        res.status(500).json({ error: "Failed to update word" });
+      }
+    })();
+  });
