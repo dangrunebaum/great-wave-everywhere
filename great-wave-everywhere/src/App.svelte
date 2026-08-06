@@ -31,11 +31,6 @@
     .scaleLinear()
     .domain([0, 0.2, 0.4, 0.6, 0.8, 0.9, 1.0])
     .range([
-      "#E8D5B0", // parchment - rarest
-      "#C4A882", // tan
-      "#8B7355", // warm brown
-      "#A8C4C8", // pale wave blue
-      "#6B9BAA", // mid wave blue
       "#2E5F8A", // strong wave blue
       "#1B3A5C", // deep navy - most frequent
     ])
@@ -366,9 +361,10 @@
 
       <p class="subtitle">
         Hokusai's "Great Wave off Kanagawa" may be the most reproduced image in
-        history. Search any word in any language to discover how it's been reimagined across
-        cultures, formats, and contexts worldwide, and help build a living
-        record of the <em>Great Wave</em>'s continuing reverberations.
+        history. Search any word in any language to discover how it's been
+        reimagined across cultures, formats, and contexts worldwide, and help
+        build a living record of the <em>Great Wave</em>'s continuing
+        reverberations.
       </p>
     </div>
   </div>
@@ -513,9 +509,9 @@
       {#if images.length === 0}
         <div class="no-images-placeholder">
           <p>
-            Enter a search term in any language above to query Google Images for "Great Wave off
-            Kanagawa + [your search term]." Your search results will appear
-            here.
+            Enter a search term in any language above to query Google Images for
+            "Great Wave off Kanagawa + [your search term]." Your search results
+            will appear here.
           </p>
         </div>
       {/if}
@@ -575,14 +571,16 @@
                 Math.log(node.count - minCount + 1) /
                 Math.log(Math.max(2, maxCount - minCount + 1))}
               {@const color = hokusaiScale(t)}
+              <!-- filter="url(#dropshadow)" -->
               <text
                 x={node.x}
                 y={node.y}
                 font-size={`${fontSize}px`}
                 fill={color}
+                fill-opacity="1"
+                opacity="1"
                 text-anchor="middle"
                 alignment-baseline="middle"
-                filter="url(#dropshadow)"
                 onmouseover={(e) => {
                   e.target.style.fill = "#1B3A5C";
                   e.target.style.cursor = "default";
@@ -994,6 +992,14 @@
     gap: 1rem;
     width: 120%;
     max-width: 480px;
+  }
+
+  .word-cloud-container text,
+  .word-cloud-container .call-to-action,
+  .word-cloud-container .trending-panel,
+  .word-cloud-container .trending-panel li,
+  .word-cloud-container .trending-panel .count {
+    opacity: 1;
   }
 
   .grid-3x3 {
